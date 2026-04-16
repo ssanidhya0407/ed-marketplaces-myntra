@@ -1,0 +1,23 @@
+version: '3.9'
+
+services:
+  myntra-oms-backend:
+    build: .
+    image: myntra-oms-backend:latest
+    container_name: myntra-oms-backend
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      MYNTRA_WEBHOOK_TOKEN: change-me-in-prod
+      MYNTRA_WEBHOOK_TOKEN_EXPIRY: ''
+      MYNTRA_ACCESS_TOKENS_JSON: ''
+      MYNTRA_TOKEN_SIGNING_SECRET: change-me-in-prod-signing-secret
+      MYNTRA_TOKEN_ISSUER: myntra
+      MYNTRA_TOKEN_CLOCK_SKEW_SEC: 30
+      REQUEST_TIMEOUT_MS: 1900
+      IDEMPOTENCY_TTL_MS: 86400000
+      LOG_BODY: 'false'
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

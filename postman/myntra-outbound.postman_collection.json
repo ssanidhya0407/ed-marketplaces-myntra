@@ -1,0 +1,196 @@
+{
+  "info": {
+    "name": "Myntra OMS Outbound APIs (Localhost)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "token",
+      "value": "change-me-in-prod"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "Create Order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-idempotency-key",
+            "value": "create-ord-123"
+          },
+          {
+            "key": "x-partner-store",
+            "value": "Myntra"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"receiverName\": \"Rahul Sharma\",\n  \"mobile\": \"9876543210\",\n  \"address\": \"HSR Layout\",\n  \"city\": \"Bengaluru\",\n  \"state\": \"KA\",\n  \"zipcode\": \"560102\",\n  \"warehouse\": \"WH1\",\n  \"paymentMethod\": \"on\",\n  \"orderLineEntries\": [\n    {\n      \"orderLineId\": \"OL1\",\n      \"sku\": \"SKU1\",\n      \"quantity\": 1\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/storefront/v4/order/ORD123"
+      }
+    },
+    {
+      "name": "Update Order (Shipped)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-partner-store",
+            "value": "Myntra"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"warehouse\": \"WH1\"\n}"
+        },
+        "url": "{{baseUrl}}/storefront/v4/order/ORD123/shipped"
+      }
+    },
+    {
+      "name": "Failure Inventory Update",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-partner-store",
+            "value": "Myntra"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"failures\": [\n    {\n      \"sku\": \"SKU1\",\n      \"storeCode\": \"WH1\",\n      \"reason\": \"Sync timeout\"\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/failureinventory/update"
+      }
+    },
+    {
+      "name": "Download Invoice",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "x-partner-store",
+            "value": "Myntra"
+          }
+        ],
+        "url": "{{baseUrl}}/storefront/v4/packet/downloadinvoice/PKT-ORD123"
+      }
+    },
+    {
+      "name": "Create Return RTO",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-partner-store",
+            "value": "Myntra"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"cou_111\",\n  \"type\": \"COURIER_RETURN\",\n  \"status\": \"CONFIRMED\",\n  \"sellerOrderId\": \"ORD123\",\n  \"orderLineId\": \"OL1\",\n  \"createdOn\": \"2026-04-16 10:00:00\",\n  \"reason\": \"Delayed delivery\",\n  \"returnWarehouseCode\": \"Warehouse\"\n}"
+        },
+        "url": "{{baseUrl}}/storefront/v4/return/cou_111"
+      }
+    },
+    {
+      "name": "Create Customer Return",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-partner-store",
+            "value": "Myntra"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"cus_222\",\n  \"type\": \"CUSTOMER_RETURN\",\n  \"status\": \"CONFIRMED\",\n  \"sellerOrderId\": \"ORD123\",\n  \"orderLineId\": \"OL1\",\n  \"createdOn\": \"2026-04-16 10:00:00\",\n  \"reason\": \"Size issue\",\n  \"returnWarehouseCode\": \"BLR4KHB\"\n}"
+        },
+        "url": "{{baseUrl}}/storefront/v4/return/cus_222"
+      }
+    },
+    {
+      "name": "Update Return",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-partner-store",
+            "value": "Myntra"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"cou_111\",\n  \"type\": \"COURIER_RETURN\",\n  \"status\": \"DELIVERED\",\n  \"sellerOrderId\": \"ORD123\",\n  \"orderLineId\": \"OL1\",\n  \"createdOn\": \"2026-04-16 10:00:00\",\n  \"reason\": \"Completed\",\n  \"returnWarehouseCode\": \"Warehouse\"\n}"
+        },
+        "url": "{{baseUrl}}/storefront/v4/return/cou_111/update"
+      }
+    }
+  ]
+}

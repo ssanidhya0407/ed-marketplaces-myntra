@@ -1,0 +1,46 @@
+const SUCCESS_RESPONSES = {
+  1000: { statusCode: 1000, statusMessage: 'Order updated successfully', statusType: 'SUCCESS' },
+  1001: { statusCode: 1001, statusMessage: 'Inventory processed successfully', statusType: 'SUCCESS' },
+  1002: { statusCode: 1002, statusMessage: 'Inventory retrieved successfully', statusType: 'SUCCESS' },
+  1004: { statusCode: 1004, statusMessage: 'Items cancelled successfully', statusType: 'SUCCESS' },
+  1005: { statusCode: 1005, statusMessage: 'Order retrieved successfully', statusType: 'SUCCESS' },
+  1006: { statusCode: 1006, statusMessage: 'Discounts processed successfully', statusType: 'SUCCESS' },
+  1009: { statusCode: 1009, statusMessage: 'Shipments verified successfully', statusType: 'SUCCESS' },
+};
+
+const ERROR_RESPONSES = {
+  401: { httpStatus: 401, statusCode: 401, statusMessage: 'Unauthenticated', statusType: 'ERROR' },
+  403: { httpStatus: 403, statusCode: 403, statusMessage: 'Unauthorised for this request', statusType: 'ERROR' },
+  1008: { httpStatus: 500, statusCode: 1008, statusMessage: 'All reassign failed in the request', statusType: 'ERROR' },
+  2000: { httpStatus: 500, statusCode: 2000, statusMessage: 'Generic server Error', statusType: 'ERROR' },
+  2001: { httpStatus: 500, statusCode: 2001, statusMessage: 'Error updating inventory', statusType: 'ERROR' },
+  2002: { httpStatus: 500, statusCode: 2002, statusMessage: 'Error retrieving inventory', statusType: 'ERROR' },
+  2003: { httpStatus: 500, statusCode: 2003, statusMessage: 'Error updating discount', statusType: 'ERROR' },
+  2004: { httpStatus: 500, statusCode: 2004, statusMessage: 'Error updating order / Business Validation failure', statusType: 'ERROR' },
+  2005: { httpStatus: 400, statusCode: 2005, statusMessage: 'Duplicate Request / Inventory is unavailable', statusType: 'ERROR' },
+  2006: { httpStatus: 400, statusCode: 2006, statusMessage: 'Invalid payload data', statusType: 'ERROR' },
+  2007: { httpStatus: 400, statusCode: 2007, statusMessage: 'Invalid sku', statusType: 'ERROR' },
+  2008: { httpStatus: 400, statusCode: 2008, statusMessage: 'Seller item info not found', statusType: 'ERROR' },
+  2020: { httpStatus: 500, statusCode: 2020, statusMessage: 'Error retrieving order', statusType: 'ERROR' },
+  2031: { httpStatus: 400, statusCode: 2031, statusMessage: 'Order line mismatch', statusType: 'ERROR' },
+  2032: { httpStatus: 400, statusCode: 2032, statusMessage: 'Order line quantity mismatch', statusType: 'ERROR' },
+  2033: { httpStatus: 400, statusCode: 2033, statusMessage: 'Order already acknowledged', statusType: 'ERROR' },
+  2034: { httpStatus: 400, statusCode: 2034, statusMessage: 'Seller mismatch', statusType: 'ERROR' },
+  2050: { httpStatus: 500, statusCode: 2050, statusMessage: 'Document Type {0} is not valid', statusType: 'ERROR' },
+  2061: { httpStatus: 400, statusCode: 2061, statusMessage: 'Order line is cancelled', statusType: 'ERROR' },
+  2062: { httpStatus: 400, statusCode: 2062, statusMessage: 'Order line is on hold', statusType: 'ERROR' },
+  2063: { httpStatus: 400, statusCode: 2063, statusMessage: 'Incorrect Dispatch Warehouse', statusType: 'ERROR' },
+  2064: { httpStatus: 400, statusCode: 2064, statusMessage: 'All items not part of same wh', statusType: 'ERROR' },
+  2065: { httpStatus: 400, statusCode: 2065, statusMessage: 'Tax Data Missing', statusType: 'ERROR' },
+  2066: { httpStatus: 400, statusCode: 2066, statusMessage: 'Invalid Tax Entries', statusType: 'ERROR' },
+  2067: { httpStatus: 500, statusCode: 2067, statusMessage: 'Tax rules not present', statusType: 'ERROR' },
+  2068: { httpStatus: 400, statusCode: 2068, statusMessage: 'Invoice number already used', statusType: 'ERROR' },
+  3001: { httpStatus: 500, statusCode: 3001, statusMessage: 'Error while creating order/return', statusType: 'ERROR' },
+  3002: { httpStatus: 500, statusCode: 3002, statusMessage: 'Error while updating order/return', statusType: 'ERROR' },
+  8247: { httpStatus: 400, statusCode: 8247, statusMessage: 'This order is not yet eligible for processing by seller', statusType: 'ERROR' },
+};
+
+module.exports = {
+  SUCCESS_RESPONSES,
+  ERROR_RESPONSES,
+};

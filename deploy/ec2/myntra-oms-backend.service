@@ -1,0 +1,19 @@
+[Unit]
+Description=Myntra OMS Backend (Docker)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=IMAGE=myntra-oms-backend:latest
+Environment=PORT=3000
+Environment=CONTAINER_NAME=myntra-oms-backend
+Environment=DATA_DIR=/var/lib/myntra-oms/data
+EnvironmentFile=-/etc/myntra-oms-backend.env
+ExecStart=/bin/bash -lc '/opt/myntra-oms/run-container.sh'
+ExecStop=/usr/bin/docker rm -f myntra-oms-backend
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

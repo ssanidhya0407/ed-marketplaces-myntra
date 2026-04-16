@@ -1,0 +1,77 @@
+{
+  "family": "myntra-oms-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/myntraOmsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "myntra-oms-backend",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/myntra-oms-backend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "PORT", "value": "3000" },
+        { "name": "IDEMPOTENCY_TTL_MS", "value": "86400000" },
+        { "name": "LOG_BODY", "value": "false" },
+        { "name": "REQUEST_TIMEOUT_MS", "value": "1900" },
+        { "name": "MYNTRA_TOKEN_ISSUER", "value": "myntra" },
+        { "name": "MYNTRA_TOKEN_CLOCK_SKEW_SEC", "value": "30" }
+      ],
+      "secrets": [
+        {
+          "name": "MYNTRA_WEBHOOK_TOKEN",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:myntra/webhook/token"
+        },
+        {
+          "name": "MYNTRA_WEBHOOK_TOKEN_EXPIRY",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:myntra/webhook/token_expiry"
+        },
+        {
+          "name": "MYNTRA_TOKEN_SIGNING_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:myntra/token/signing_secret"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "myntra-data",
+          "containerPath": "/app/data",
+          "readOnly": false
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/myntra-oms-backend",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "myntra-data",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "<EFS_FILESYSTEM_ID>",
+        "rootDirectory": "/myntra-oms/data",
+        "transitEncryption": "ENABLED"
+      }
+    }
+  ]
+}

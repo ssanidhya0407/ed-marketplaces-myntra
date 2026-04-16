@@ -1,0 +1,27 @@
+{
+  "serviceName": "myntra-oms-backend-svc",
+  "cluster": "myntra-oms-cluster",
+  "taskDefinition": "myntra-oms-backend",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "platformVersion": "LATEST",
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["subnet-aaaa", "subnet-bbbb"],
+      "securityGroups": ["sg-xxxx"],
+      "assignPublicIp": "DISABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "arn:aws:elasticloadbalancing:<REGION>:<ACCOUNT_ID>:targetgroup/myntra-oms-tg/xxxxxxxx",
+      "containerName": "myntra-oms-backend",
+      "containerPort": 3000
+    }
+  ],
+  "healthCheckGracePeriodSeconds": 45,
+  "deploymentConfiguration": {
+    "maximumPercent": 200,
+    "minimumHealthyPercent": 100
+  }
+}
