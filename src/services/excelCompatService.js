@@ -56,22 +56,30 @@ function findOrderByPacket(packetId) {
 }
 
 function generateToken() {
+  const access_token = randomToken();
+  const refresh_token = randomToken();
   return {
-    status: 'SUCCESS',
-    message: 'Token generated successfully',
-    access_token: randomToken(),
-    refresh_token: randomToken(),
-    expires_in: 3600,
+    code: 1000,
+    overrideMessage: 'Token generated successfully',
+    extraFields: {
+      access_token,
+      refresh_token,
+      expires_in: 3600,
+    },
   };
 }
 
 function refreshToken() {
+  const access_token = randomToken();
+  const refresh_token = randomToken();
   return {
-    status: 'SUCCESS',
-    message: 'Token refreshed successfully',
-    access_token: randomToken(),
-    refresh_token: randomToken(),
-    expires_in: 3600,
+    code: 1000,
+    overrideMessage: 'Token refreshed successfully',
+    extraFields: {
+      access_token,
+      refresh_token,
+      expires_in: 3600,
+    },
   };
 }
 
@@ -178,13 +186,22 @@ function partnerEvent(sellerOrderId, eventType, body) {
     };
   }
 
-  return orderService.updateOrder({
+  const updateResult = orderService.updateOrder({
     params: {
       sellerOrderId: String(sellerOrderId),
       eventType,
     },
     body: body || {},
   });
+
+  if (eventType === 'itemCancellation' && updateResult.code === 1004) {
+    return {
+      ...updateResult,
+      code: 1000,
+    };
+  }
+
+  return updateResult;
 }
 
 function readyToDispatchFromPartner(body) {
@@ -323,7 +340,11 @@ function createReturnMock(id, body) {
     },
   };
 
-  return returnService.createReturn(payload);
+  const result = returnService.createReturn(payload);
+  return {
+    ...result,
+    overrideMessage: 'Return Created Successfully',
+  };
 }
 
 function updateReturnMock(returnId, body) {
@@ -340,7 +361,7 @@ function updateReturnMock(returnId, body) {
     });
   }
 
-  return returnService.updateReturn({
+  const result = returnService.updateReturn({
     params: { returnId },
     body: {
       id: returnId,
@@ -353,6 +374,11 @@ function updateReturnMock(returnId, body) {
       returnWarehouseCode: body?.returnWarehouseCode || 'Warehouse',
     },
   });
+
+  return {
+    ...result,
+    overrideMessage: 'Order updated successfully',
+  };
 }
 
 function updateSku(body) {

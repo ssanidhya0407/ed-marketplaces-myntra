@@ -17,12 +17,24 @@ function wrap(handler) {
 
 router.post(
   '/authorization/generate_token',
-  wrap((req, res) => res.status(200).json(excelCompat.generateToken())),
+  wrap((req, res) => {
+    const result = excelCompat.generateToken();
+    return sendSuccess(req, res, result.code, {
+      overrideMessage: result.overrideMessage,
+      extraFields: result.extraFields,
+    });
+  }),
 );
 
 router.post(
   '/authorization/refresh_token',
-  wrap((req, res) => res.status(200).json(excelCompat.refreshToken())),
+  wrap((req, res) => {
+    const result = excelCompat.refreshToken();
+    return sendSuccess(req, res, result.code, {
+      overrideMessage: result.overrideMessage,
+      extraFields: result.extraFields,
+    });
+  }),
 );
 
 router.put(
