@@ -20,6 +20,18 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(requestTimeoutMiddleware(env.requestTimeoutMs));
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', env.corsAllowOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type,access_token,x-partner-store,x-idempotency-key',
+  );
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  return next();
+});
 
 app.use(loggingMiddleware(env));
 app.use(

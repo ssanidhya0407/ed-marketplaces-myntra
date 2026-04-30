@@ -9,6 +9,7 @@ const env = {
   tokenIssuer: process.env.MYNTRA_TOKEN_ISSUER || 'myntra',
   tokenClockSkewSec: Number(process.env.MYNTRA_TOKEN_CLOCK_SKEW_SEC || 30),
   requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS || 1900),
+  corsAllowOrigin: process.env.CORS_ALLOW_ORIGIN || '*',
 };
 
 module.exports = env;

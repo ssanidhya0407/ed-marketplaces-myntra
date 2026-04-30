@@ -2,12 +2,29 @@ const crypto = require('crypto');
 
 const db = require('../db/mockDb');
 const AppError = require('../errors/AppError');
+const env = require('../config/env');
 const orderService = require('./orderService');
 const returnService = require('./returnService');
 const inventoryService = require('./inventoryService');
 
 function randomToken() {
   return crypto.randomBytes(24).toString('base64url');
+}
+
+function createSignedAccessToken(expiresInSec = 3600) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: env.tokenIssuer || 'myntra',
+    iat: nowSec,
+    nbf: nowSec,
+    exp: nowSec + expiresInSec,
+  };
+  const payloadPart = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signaturePart = crypto
+    .createHmac('sha256', env.tokenSigningSecret)
+    .update(payloadPart)
+    .digest('base64url');
+  return `${payloadPart}.${signaturePart}`;
 }
 
 function ensureOrderExists(sellerOrderId, options = {}) {
@@ -56,7 +73,7 @@ function findOrderByPacket(packetId) {
 }
 
 function generateToken() {
-  const access_token = randomToken();
+  const access_token = createSignedAccessToken(3600);
   const refresh_token = randomToken();
   return {
     code: 1000,
@@ -70,7 +87,7 @@ function generateToken() {
 }
 
 function refreshToken() {
-  const access_token = randomToken();
+  const access_token = createSignedAccessToken(3600);
   const refresh_token = randomToken();
   return {
     code: 1000,
