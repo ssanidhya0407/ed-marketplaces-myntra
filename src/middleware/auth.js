@@ -120,8 +120,20 @@ function authMiddleware(config) {
     return { valid: true, payload };
   }
 
+  function extractToken(req) {
+    const headerToken = req.headers.access_token;
+    if (headerToken && typeof headerToken === 'string') return headerToken;
+
+    // Myntra clients send the token via Authorization (optionally Bearer-prefixed).
+    const authorization = req.headers.authorization;
+    if (authorization && typeof authorization === 'string') {
+      return authorization.replace(/^Bearer\s+/i, '');
+    }
+    return null;
+  }
+
   return (req, _res, next) => {
-    const accessToken = req.headers.access_token;
+    const accessToken = extractToken(req);
     if (!accessToken || typeof accessToken !== 'string') {
       return next(new AppError(401));
     }

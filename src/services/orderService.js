@@ -2,12 +2,30 @@ const AppError = require('../errors/AppError');
 const db = require('../db/mockDb');
 const { hashPayload } = require('../utils/hash');
 
+// Internal status -> Myntra order search statusCode (per myntradeveloper.md)
+const MYNTRA_STATUS_CODE_MAP = {
+  CREATED: 'RFR',
+  ACCEPTED: 'WP',
+  ON_HOLD: 'WP',
+  READY_TO_DISPATCH: 'PK',
+  SHIPPED: 'SH',
+  LOST: 'SH',
+  DELIVERED: 'DL',
+  CANCELLED: 'IC',
+  REJECTED: 'IC',
+};
+
+function toMyntraStatusCode(status) {
+  return MYNTRA_STATUS_CODE_MAP[status] || status;
+}
+
 function serializeOrder(order) {
   return {
     sellerOrderId: order.sellerOrderId,
     status: order.status,
     warehouse: order.warehouse,
     packetId: order.packetId,
+    createdOn: order.createdOn || null,
     orderLines: Array.from(order.lineMap.values()).map((line) => ({
       orderLineId: String(line.orderLineId),
       sku: String(line.sku),
@@ -51,6 +69,7 @@ function createOrder({ params, body }) {
     statusHistory: ['CREATED'],
     warehouse: body.warehouse,
     payloadHash: hashPayload(body),
+    createdOn: new Date().toISOString(),
     lineMap,
   });
   db.packets.set(packetId, {
@@ -192,6 +211,63 @@ function downloadInvoice({ params }) {
   };
 }
 
+function parseDateBoundary(value, endOfDay) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const parsed = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z` : raw);
+  if (Number.isNaN(parsed)) {
+    throw new AppError(2006, `Invalid date: ${raw}. Expected YYYY-MM-DD`);
+  }
+  return parsed;
+}
+
+function getOrderList({ query }) {
+  const page = Math.max(0, Number.parseInt(query?.page, 10) || 0);
+  const requestedPageSize = Number.parseInt(query?.pageSize, 10);
+  const pageSize = Math.min(100, Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 20));
+  const startMs = parseDateBoundary(query?.startDate, false);
+  const endMs = parseDateBoundary(query?.endDate, true);
+  const statusCodes = String(query?.statusCode || '')
+    .split(',')
+    .map((code) => code.trim().toUpperCase())
+    .filter(Boolean);
+
+  const matches = [];
+  for (const order of db.orders.values()) {
+    if (statusCodes.length && !statusCodes.includes(toMyntraStatusCode(order.status))) continue;
+    if (startMs !== null || endMs !== null) {
+      // Orders persisted before createdOn existed stay visible in date queries.
+      const createdMs = order.createdOn ? Date.parse(order.createdOn) : null;
+      if (createdMs !== null) {
+        if (startMs !== null && createdMs < startMs) continue;
+        if (endMs !== null && createdMs > endMs) continue;
+      }
+    }
+    matches.push(order);
+  }
+
+  matches.sort((a, b) => String(b.createdOn || '').localeCompare(String(a.createdOn || '')));
+
+  const totalCount = matches.length;
+  const orders = matches.slice(page * pageSize, page * pageSize + pageSize).map((order) => ({
+    ...serializeOrder(order),
+    statusCode: toMyntraStatusCode(order.status),
+  }));
+
+  return {
+    code: 1005,
+    overrideMessage: 'Orders retrieved successfully',
+    extraFields: {
+      page,
+      pageSize,
+      totalCount,
+      totalPages: Math.ceil(totalCount / pageSize),
+      orders,
+    },
+  };
+}
+
 function getOrderById({ params }) {
   const order = db.orders.get(params.sellerOrderId);
   if (!order) throw new AppError(2020);
@@ -221,5 +297,6 @@ module.exports = {
   updateOrder,
   downloadInvoice,
   getOrderById,
+  getOrderList,
   getPacketById,
 };

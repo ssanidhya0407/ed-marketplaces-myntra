@@ -2,6 +2,7 @@ const express = require('express');
 
 const { sendSuccess } = require('../services/responseService');
 const excelCompat = require('../services/excelCompatService');
+const orderService = require('../services/orderService');
 
 const router = express.Router();
 
@@ -128,6 +129,18 @@ router.put(
   wrap((req, res) => {
     const result = excelCompat.readyToShipByTracking(req.params.trackingNumber);
     return sendSuccess(req, res, result.code);
+  }),
+);
+
+// Order Search (myntradeveloper.md) — registered before :sellerOrderId so it is not captured by it.
+router.get(
+  '/partner/v4/order/getOrderList',
+  wrap((req, res) => {
+    const result = orderService.getOrderList({ query: req.query });
+    return sendSuccess(req, res, result.code, {
+      overrideMessage: result.overrideMessage,
+      extraFields: result.extraFields,
+    });
   }),
 );
 

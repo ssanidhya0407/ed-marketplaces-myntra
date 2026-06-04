@@ -25,7 +25,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type,access_token,x-partner-store,x-idempotency-key',
+    'Content-Type,access_token,Authorization,x-partner-store,x-idempotency-key',
   );
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
