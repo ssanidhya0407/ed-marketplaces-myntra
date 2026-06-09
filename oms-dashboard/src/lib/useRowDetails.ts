@@ -11,21 +11,30 @@ export interface RowDetail {
   amount: number | null;
   image: string | null;
   qty: number | null;
+  status: string | null; // detail status_code (authoritative; the list summary omits it)
 }
 
-const EMPTY: RowDetail = { packetId: null, sku: null, amount: null, image: null, qty: null };
+const EMPTY: RowDetail = { packetId: null, sku: null, amount: null, image: null, qty: null, status: null };
 
 export function useRowDetails(orders: OrderSummary[]): Record<string, RowDetail | undefined> {
   const [map, setMap] = useState<Record<string, RowDetail>>({});
   const cache = useRef<Record<string, RowDetail>>({});
 
+  // Stable dependency: the set of seller IDs in view, as a string. This avoids
+  // re-running on every render just because `orders` is a fresh array reference.
+  const idsKey = orders.map((o) => o.orderLines?.[0]?.sellerOrderId).filter(Boolean).join(',');
+
   useEffect(() => {
     let cancelled = false;
-    const todo = orders
-      .map((o) => o.orderLines?.[0]?.sellerOrderId)
-      .filter((s): s is string => !!s && !(s in cache.current));
+    const ids = idsKey ? idsKey.split(',') : [];
+    const todo = ids.filter((s) => !(s in cache.current));
 
-    if (!todo.length) { setMap({ ...cache.current }); return; }
+    if (!todo.length) {
+      // Sync state to cache only if a visible id is missing — return the same
+      // reference otherwise so React bails out (no re-render, no loop).
+      setMap((prev) => (ids.every((s) => s in prev) ? prev : { ...cache.current }));
+      return;
+    }
 
     Promise.all(
       todo.map(async (sid) => {
@@ -41,6 +50,7 @@ export function useRowDetails(orders: OrderSummary[]): Record<string, RowDetail 
               amount: first.lineFinalAmount ?? first.mrp ?? null,
               image: first.imageUrl ?? first.image ?? null,
               qty: lines.length || null,
+              status: first.status_code ?? null,
             };
           } else {
             cache.current[sid] = EMPTY;
@@ -52,7 +62,7 @@ export function useRowDetails(orders: OrderSummary[]): Record<string, RowDetail 
     ).then(() => { if (!cancelled) setMap({ ...cache.current }); });
 
     return () => { cancelled = true; };
-  }, [orders]);
+  }, [idsKey]);
 
   return map;
 }

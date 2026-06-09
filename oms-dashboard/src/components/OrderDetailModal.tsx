@@ -8,7 +8,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { formatINR, formatDate, cx } from '@/lib/utils';
-import { allowedActions, ACTION_META, type ActionKey } from '@/lib/status';
+import { allowedActions, ACTION_META, isAwaitingRelease, type ActionKey } from '@/lib/status';
 import StatusBadge from './StatusBadge';
 import { useNotifications } from './NotificationProvider';
 
@@ -19,6 +19,12 @@ export default function OrderDetailModal({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<ActionKey | null>(null);
   const { pushToast } = useNotifications();
+
+  // Ready-to-Dispatch form (PPMP: RTD requires seller invoice + tax — collection schema).
+  const [rtdOpen, setRtdOpen] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(''); // datetime-local value
+  const [rtdSubmitting, setRtdSubmitting] = useState(false);
 
   async function fetchDetail() {
     setLoading(true);
@@ -57,7 +63,9 @@ export default function OrderDetailModal({
       body.trackingNo = tn;
     }
     if (action === 'ready_to_dispatch') {
-      body.orderLineEntries = lines.map((l) => ({ sellerOrderId, orderLineId: l.orderLineId }));
+      // RTD needs invoice + tax — handled by the dedicated form (openRtd/submitRtd).
+      openRtd();
+      return;
     }
     const label = ACTION_META[action].label;
     if (!window.confirm(`This will ${label.toUpperCase()} on the LIVE Myntra account for order ${sellerOrderId}.\n\nProceed?`)) return;
@@ -76,6 +84,63 @@ export default function OrderDetailModal({
       pushToast({ tone: 'err', title: 'Network error', message: e.message });
     } finally {
       setBusy(null);
+    }
+  }
+
+  function openRtd() {
+    // default invoice date = now, as a datetime-local value
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    setInvoiceDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    setInvoiceNumber('');
+    setRtdOpen(true);
+  }
+
+  // datetime-local "yyyy-MM-ddTHH:mm" -> Myntra "dd-MM-yyyy HH:mm:ss"
+  function toMyntraDate(v: string): string {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v);
+    if (!m) return v;
+    return `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}:00`;
+  }
+
+  async function submitRtd() {
+    if (!invoiceNumber.trim()) { pushToast({ tone: 'err', title: 'Invoice number required', message: 'Enter your seller invoice number.' }); return; }
+    if (!invoiceDate) { pushToast({ tone: 'err', title: 'Invoice date required', message: 'Pick the invoice date.' }); return; }
+    const warehouse = lines[0]?.warehouse || detail.warehouse;
+    const orderLineEntries = lines.map((l) => ({
+      sellerOrderId,
+      orderLineId: l.orderLineId,
+      invoiceNumber: invoiceNumber.trim(),
+      invoiceDate: toMyntraDate(invoiceDate),
+      unitTotalAmount: l.lineFinalAmount ?? l.mrp ?? undefined,
+      // carry the tax breakup Myntra already attached to the order line
+      taxEntries: Array.isArray(l.taxEntries)
+        ? l.taxEntries.map((t: any) => ({
+            taxType: t.taxType,
+            taxRate: t.taxRate,
+            unitTaxAmount: t.unitTaxAmount,
+            unitTaxableAmount: t.unitTaxableAmount,
+          }))
+        : undefined,
+    }));
+
+    if (!window.confirm(`Mark order ${sellerOrderId} READY TO DISPATCH on the LIVE Myntra account?\n\nThis packs the order, files invoice ${invoiceNumber.trim()}, and generates the packet/label. It cannot be cancelled afterwards.`)) return;
+
+    setRtdSubmitting(true);
+    try {
+      const res = await api.action(sellerOrderId, { action: 'ready_to_dispatch', warehouse, orderLineEntries });
+      if (res.ok) {
+        pushToast({ tone: 'ok', title: 'Ready to Dispatch done', message: `${res.message || 'Order packed'} (code ${res.statusCode ?? res.httpStatus})` });
+        setRtdOpen(false);
+        await fetchDetail();
+        onMutated?.();
+      } else {
+        pushToast({ tone: 'err', title: 'Myntra rejected RTD', message: `${res.message || res.error || 'Failed'} (HTTP ${res.httpStatus}${res.statusCode ? ', code ' + res.statusCode : ''})` });
+      }
+    } catch (e: any) {
+      pushToast({ tone: 'err', title: 'Network error', message: e.message });
+    } finally {
+      setRtdSubmitting(false);
     }
   }
 
@@ -185,6 +250,56 @@ export default function OrderDetailModal({
                 </table>
               </div>
             </Section>
+
+            {/* Ready-to-Dispatch form (PPMP) */}
+            {rtdOpen && (
+              <div className="bg-indigo-50/40 border border-indigo-200/60 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[12px] font-semibold text-indigo-700 flex items-center gap-1.5"><Truck size={13} /> Ready to Dispatch — pack &amp; file invoice</h4>
+                  <button onClick={() => setRtdOpen(false)} className="text-zinc-400 hover:text-zinc-700"><X size={14} /></button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Seller invoice number *</label>
+                    <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-2026-00123"
+                      className="mt-1 w-full px-3 py-2 text-[12px] bg-white border border-black/[0.08] rounded-lg focus:border-indigo-400 outline-none font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Invoice date *</label>
+                    <input type="datetime-local" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 text-[12px] bg-white border border-black/[0.08] rounded-lg focus:border-indigo-400 outline-none" />
+                  </div>
+                </div>
+                <div className="rounded-lg border border-black/[0.06] overflow-hidden bg-white">
+                  <table className="w-full text-[11px]">
+                    <thead className="bg-zinc-50 text-[9px] uppercase text-zinc-500">
+                      <tr><th className="px-2 py-1.5 text-left">SKU</th><th className="px-2 py-1.5 text-right">Unit total</th><th className="px-2 py-1.5 text-left">Tax</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+                      {lines.map((l) => (
+                        <tr key={l.orderLineId}>
+                          <td className="px-2 py-1.5 font-semibold">{l.sku}</td>
+                          <td className="px-2 py-1.5 text-right">{formatINR(l.lineFinalAmount ?? l.mrp)}</td>
+                          <td className="px-2 py-1.5 text-zinc-500">
+                            {Array.isArray(l.taxEntries) && l.taxEntries.length
+                              ? l.taxEntries.map((t: any, i: number) => <span key={i}>{t.taxType} {t.taxRate}%{i < l.taxEntries.length - 1 ? ', ' : ''}</span>)
+                              : <span className="text-zinc-400">none on order</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[10px] text-zinc-500">Amount &amp; tax are taken from the order as Myntra supplied it. RTD is irreversible — the order cannot be cancelled after this.</p>
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={() => setRtdOpen(false)} disabled={rtdSubmitting} className="px-3 py-1.5 text-[11px] font-medium text-zinc-600 hover:text-zinc-900 disabled:opacity-50">Cancel</button>
+                  <button onClick={submitRtd} disabled={rtdSubmitting}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-lg shadow-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+                    {rtdSubmitting && <Loader2 size={11} className="animate-spin" />} Confirm Ready to Dispatch
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -196,7 +311,11 @@ export default function OrderDetailModal({
             </span>
             <div className="flex items-center gap-2 flex-wrap">
               {actions.length === 0 ? (
-                <span className="text-[12px] text-zinc-400">No further action for this status</span>
+                <span className="text-[12px] text-zinc-400">
+                  {isAwaitingRelease(headStatus)
+                    ? 'Received — awaiting release to Work in Progress by Myntra. Ready to Dispatch unlocks then.'
+                    : 'No further seller action for this status.'}
+                </span>
               ) : actions.map((a) => {
                 const meta = ACTION_META[a];
                 return (

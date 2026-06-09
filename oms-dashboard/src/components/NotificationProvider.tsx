@@ -63,10 +63,14 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const poll = useCallback(async () => {
     try {
-      const res = await api.listOrders({ page: 0 });
-      if (!res.ok) return;
+      // Watch orders needing attention: WP (ready to dispatch) + RFR (received).
+      const [wp, rfr] = await Promise.all([
+        api.listOrders({ page: 0, statusCode: 'WP' }),
+        api.listOrders({ page: 0, statusCode: 'RFR' }),
+      ]);
+      if (!wp.ok && !rfr.ok) return;
       setLastSync(new Date());
-      const orders = res.orders || [];
+      const orders = [...(wp.orders || []), ...(rfr.orders || [])];
       const seen = seenRef.current;
 
       if (!seededRef.current) {

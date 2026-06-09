@@ -3,14 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RotateCw } from 'lucide-react';
 import { api, type OrderSummary } from '@/lib/api';
-import { isNewStatus } from '@/lib/status';
 import { useRowDetails } from '@/lib/useRowDetails';
 import OrdersTable from '@/components/OrdersTable';
 import OrderDetailModal from '@/components/OrderDetailModal';
 import { useNotifications } from '@/components/NotificationProvider';
 
-// "New" = orders not yet actioned (no status / RFR). Myntra has no RFR-only filter
-// for these, so we aggregate across all pages and filter client-side.
+// "New" = Myntra status RFR (Ready For RTD). We query that filter directly
+// (myntradeveloper.md §Order Search) instead of guessing from blank summary statuses.
 export default function NewOrdersPage() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,15 +22,19 @@ export default function NewOrdersPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const first = await api.listOrders({ page: 0 });
-      if (!first.ok) { setError(first.statusMessage || first.error || 'Failed to load'); setLoading(false); return; }
-      const pages = first.pages || 1;
-      let all = first.orders || [];
-      for (let p = 1; p < pages; p++) {
-        const r = await api.listOrders({ page: p });
-        if (r.ok) all = all.concat(r.orders || []);
-      }
-      setOrders(all.filter((o) => isNewStatus(o.orderLines?.[0]?.status)));
+      // Orders needing attention: WP (ready to dispatch) + RFR (received, awaiting release).
+      const fetchAll = async (statusCode: string) => {
+        const first = await api.listOrders({ page: 0, statusCode });
+        if (!first.ok) return [] as OrderSummary[];
+        let all = first.orders || [];
+        for (let p = 1; p < (first.pages || 1); p++) {
+          const r = await api.listOrders({ page: p, statusCode });
+          if (r.ok) all = all.concat(r.orders || []);
+        }
+        return all;
+      };
+      const [wp, rfr] = await Promise.all([fetchAll('WP'), fetchAll('RFR')]);
+      setOrders([...wp, ...rfr]); // WP (actionable) first, then RFR (pending)
     } catch (e: any) {
       setError(e.message);
     }

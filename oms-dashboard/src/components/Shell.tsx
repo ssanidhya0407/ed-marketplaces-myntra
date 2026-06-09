@@ -145,7 +145,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <div className="ml-[230px]">
         <header className="sticky top-0 z-30 h-[60px] bg-[#FAF9F6]/95 backdrop-blur-xl border-b border-black/[0.06] flex items-center justify-end px-6 gap-2">
           <span className="text-[12px] text-emerald-600 font-semibold flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live · Myntra
           </span>
           <div className="w-px h-5 bg-black/[0.08] mx-1" />
           <NotificationBell />

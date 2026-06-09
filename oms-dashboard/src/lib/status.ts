@@ -1,31 +1,39 @@
-// Full Myntra order-status map → SmartCommerce-style badge classes.
-// New orders arrive with no status (null) — treated as RFR / "New".
+// Myntra order-status map.
+// Documented status values (myntradeveloper.md §Order Search): RFR, WP, IC, PK, SH, DL.
+// Observed-but-undocumented: C (terminal/closed — old completed orders carry it).
 type Tone = { label: string; cls: string };
 
 export const STATUS_MAP: Record<string, Tone> = {
-  RFR: { label: 'New', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  RFR: { label: 'New', cls: 'bg-blue-50 text-blue-700 border-blue-200' },       // Ready For RTD
   WP:  { label: 'In Progress', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-  PK:  { label: 'Packed', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-  RTD: { label: 'Ready to Dispatch', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
-  RTS: { label: 'Ready to Ship', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
+  PK:  { label: 'Packed', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
   SH:  { label: 'Shipped', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  OFD: { label: 'Out for Delivery', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   DL:  { label: 'Delivered', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   IC:  { label: 'Cancelled', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  C:   { label: 'Completed', cls: 'bg-zinc-100 text-zinc-600 border-zinc-200' }, // undocumented, terminal
+  // extra codes we may encounter
+  RTD: { label: 'Ready to Dispatch', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
   RTO: { label: 'Return to Origin', cls: 'bg-zinc-100 text-zinc-600 border-zinc-200' },
-  RT:  { label: 'Returned', cls: 'bg-zinc-100 text-zinc-600 border-zinc-200' },
-  L:   { label: 'Lost', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
 };
 
 export function statusInfo(code: string | null | undefined): { code: string; label: string; cls: string } {
-  if (code == null || code === '') return { code: 'RFR', ...STATUS_MAP.RFR };
+  // A blank summary status is NOT reliably "new" — the list omits status for closed
+  // orders. Treat unknown/blank as "Unknown" unless the caller passes the detail code.
+  if (code == null || code === '') return { code: '', label: 'Unknown', cls: 'bg-zinc-100 text-zinc-500 border-zinc-200' };
   const key = String(code).toUpperCase();
   if (STATUS_MAP[key]) return { code: key, ...STATUS_MAP[key] };
   return { code: key, label: key, cls: 'bg-zinc-100 text-zinc-700 border-zinc-200' };
 }
 
+// Genuinely-new = Myntra status RFR only.
 export const isNewStatus = (code: string | null | undefined): boolean =>
-  code == null || code === '' || String(code).toUpperCase() === 'RFR';
+  String(code ?? '').toUpperCase() === 'RFR';
+
+// Seller fulfillment model. Accept/Reject is Omni-only (myntradeveloper.md §Accept/Reject
+// + inbound reference: "Not applicable for PPMP model. Omni only."). This account
+// (ALYA-V4-PPMP) is PPMP, so its new orders go straight to Ready to Dispatch.
+export type PartnerModel = 'PPMP' | 'OMNI';
+export const PARTNER_MODEL: PartnerModel = 'PPMP';
 
 export type ActionKey = 'accept' | 'reject' | 'ready_to_dispatch' | 'ready_to_ship' | 'cancel';
 
@@ -37,18 +45,37 @@ export const ACTION_META: Record<ActionKey, { label: string; variant: 'primary' 
   cancel:            { label: 'Cancel', variant: 'danger' },
 };
 
-// Which actions make sense for a given status (drives the modal footer).
-export function allowedActions(code: string | null | undefined): ActionKey[] {
-  const s = code == null ? 'RFR' : String(code).toUpperCase();
+// Which actions are valid for a status, per the seller model.
+// PPMP flow (myntradeveloper.md §RTD workflow): New(RFR) -> RTD -> Packed -> RTS -> Shipped.
+export function allowedActions(code: string | null | undefined, model: PartnerModel = PARTNER_MODEL): ActionKey[] {
+  const s = String(code ?? '').toUpperCase();
+  if (model === 'OMNI') {
+    switch (s) {
+      case 'RFR': return ['accept', 'reject'];
+      case 'WP':  return ['ready_to_dispatch', 'cancel'];
+      case 'PK':
+      case 'RTD': return ['ready_to_ship', 'cancel'];
+      default:    return [];
+    }
+  }
+  // PPMP. Verified against the live API:
+  //  - RFR is "received, awaiting release" — RFR->WP is a Myntra-side transition,
+  //    NOT a seller action (Accept is rejected for PPMP). So no RTD on RFR.
+  //  - RTD is valid only once Myntra moves the order to WP (Work in Progress).
   switch (s) {
-    case 'RFR': return ['accept', 'reject', 'cancel'];
-    case 'WP':  return ['ready_to_dispatch', 'cancel'];
+    case 'RFR': return [];                              // awaiting Myntra release to WP
+    case 'WP':  return ['ready_to_dispatch', 'cancel']; // now seller-actionable
     case 'PK':
     case 'RTD': return ['ready_to_ship', 'cancel'];
     case 'SH':
     case 'DL':
     case 'IC':
+    case 'C':
     case 'RTO': return [];
-    default:    return ['accept', 'reject', 'ready_to_dispatch', 'ready_to_ship', 'cancel'];
+    default:    return [];
   }
 }
+
+// RFR orders are received but not yet released by Myntra for fulfilment.
+export const isAwaitingRelease = (code: string | null | undefined): boolean =>
+  String(code ?? '').toUpperCase() === 'RFR';
