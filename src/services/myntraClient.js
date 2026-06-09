@@ -111,6 +111,47 @@ async function myntraGet(path, query) {
   return { status, body };
 }
 
+// GET returning the raw bytes (for PDF documents like labels / invoices).
+async function myntraRaw(path) {
+  const accessToken = await getAccessToken();
+  const doFetch = (token) =>
+    fetch(`${env.myntraApiBase}${path}`, {
+      method: 'GET',
+      headers: { access_token: token, 'x-partner-store': env.myntraPartnerStore },
+    });
+
+  let response = await doFetch(accessToken);
+  if (response.status === 401) {
+    cachedToken = null;
+    response = await doFetch(await getAccessToken());
+  }
+  const contentType = response.headers.get('content-type') || '';
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { status: response.status, contentType, buffer };
+}
+
+// Generic mutating call (PUT/POST) with JSON body + one 401 refresh+retry.
+async function myntraSend(method, path, jsonBody) {
+  const accessToken = await getAccessToken();
+  const opts = (token) => ({
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      access_token: token,
+      'x-partner-store': env.myntraPartnerStore,
+    },
+    body: jsonBody === undefined ? undefined : JSON.stringify(jsonBody),
+  });
+
+  let res = await requestJson(`${env.myntraApiBase}${path}`, opts(accessToken));
+  if (res.status === 401) {
+    cachedToken = null;
+    res = await requestJson(`${env.myntraApiBase}${path}`, opts(await getAccessToken()));
+  }
+  return { status: res.status, body: res.body };
+}
+
+// ---- Reads ----
 // Order Search (myntradeveloper.md): GET /partner/v4/order/getOrderList
 function fetchOrderList({ page = 0, statusCode, startDate, endDate } = {}) {
   return myntraGet('/partner/v4/order/getOrderList', { page, statusCode, startDate, endDate });
@@ -120,8 +161,62 @@ function fetchOrderById(sellerOrderId) {
   return myntraGet(`/partner/v4/order/${encodeURIComponent(sellerOrderId)}`);
 }
 
+function fetchPacketById(packetId) {
+  return myntraGet(`/partner/v4/packet/${encodeURIComponent(packetId)}`);
+}
+
+// ---- Documents (raw PDF) ----
+function fetchShippingLabel(packetId) {
+  return myntraRaw(`/partner/v4/packet/${encodeURIComponent(packetId)}/shippingLabel/`);
+}
+
+function fetchInvoice(packetId) {
+  return myntraRaw(`/partner/v4/packet/${encodeURIComponent(packetId)}/getDocument/?type=invoice`);
+}
+
+// ---- Status changes (mutating) ----
+// Accept / Reject order lines: PUT /partner/v4/order/:sellerOrderId/:EventType
+function updateOrderEvent(sellerOrderId, eventType, { warehouse, orderLineIds = [], eventTime } = {}) {
+  const ev = String(eventType || '').toLowerCase();
+  if (ev !== 'accept' && ev !== 'reject') throw new AppError(2006, 'eventType must be accept or reject');
+  return myntraSend('PUT', `/partner/v4/order/${encodeURIComponent(sellerOrderId)}/${ev}`, {
+    eventTime: eventTime || new Date().toISOString().replace('T', ' ').slice(0, 19),
+    warehouse: warehouse || undefined,
+    orderLineEntries: orderLineIds.map((orderLineId) => ({ orderLineId })),
+  });
+}
+
+// Cancel order lines: PUT /partner/v4/order/:sellerOrderId/cancelItems  body=[{orderLineId, comment}]
+function cancelOrderItems(sellerOrderId, { orderLineIds = [], comment = 'Cancelled via OMS' } = {}) {
+  if (!orderLineIds.length) throw new AppError(2006, 'At least one orderLineId is required');
+  return myntraSend(
+    'PUT',
+    `/partner/v4/order/${encodeURIComponent(sellerOrderId)}/cancelItems`,
+    orderLineIds.map((orderLineId) => ({ orderLineId, comment })),
+  );
+}
+
+// Ready To Ship: PUT /partner/v4/trackingNumber/:trackingNo/readyToShip  (no body)
+function markReadyToShip(trackingNo) {
+  if (!trackingNo) throw new AppError(2006, 'trackingNumber is required');
+  return myntraSend('PUT', `/partner/v4/trackingNumber/${encodeURIComponent(trackingNo)}/readyToShip`);
+}
+
+// Ready To Dispatch: PUT /partner/v4/order/readyToDispatch  body={warehouse, orderLineEntries:[...]}
+function markReadyToDispatch({ warehouse, orderLineEntries = [] } = {}) {
+  if (!orderLineEntries.length) throw new AppError(2006, 'orderLineEntries is required');
+  return myntraSend('PUT', '/partner/v4/order/readyToDispatch/', { warehouse, orderLineEntries });
+}
+
 module.exports = {
   generateToken,
   fetchOrderList,
   fetchOrderById,
+  fetchPacketById,
+  fetchShippingLabel,
+  fetchInvoice,
+  updateOrderEvent,
+  cancelOrderItems,
+  markReadyToShip,
+  markReadyToDispatch,
 };
