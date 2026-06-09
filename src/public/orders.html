@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Myntra Orders — Warehouse</title>
+  <style>
+    :root {
+      --pink: #ff3f6c;
+      --pink-dark: #e63462;
+      --ink: #282c3f;
+      --muted: #7e818c;
+      --line: #eaeaec;
+      --bg: #f5f5f6;
+      --green: #03a685;
+      --amber: #ff9f00;
+      --red: #ff5b5b;
+      --blue: #2b6cb0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .brand { font-weight: 800; font-size: 20px; letter-spacing: .5px; }
+    .brand span { color: var(--pink); }
+    .brand small { display:block; font-weight:500; font-size:11px; color:var(--muted); letter-spacing:0; }
+    header .spacer { flex: 1; }
+    .meta { font-size: 13px; color: var(--muted); }
+    .meta b { color: var(--ink); }
+    .controls {
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+      padding: 16px 24px; background: #fff; border-bottom: 1px solid var(--line);
+    }
+    select, button {
+      font: inherit; border: 1px solid var(--line); background: #fff; color: var(--ink);
+      padding: 9px 14px; border-radius: 4px; cursor: pointer;
+    }
+    button.primary { background: var(--pink); color: #fff; border-color: var(--pink); font-weight: 600; }
+    button.primary:hover { background: var(--pink-dark); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .wrap { padding: 20px 24px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    th, td { text-align: left; padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--line); }
+    th { background: #fafafa; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; font-size: 11px; }
+    tbody tr.order-row { cursor: pointer; }
+    tbody tr.order-row:hover { background: #fff5f7; }
+    td.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; color: var(--muted); }
+    .pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .3px; }
+    .pill.RFR { background: #e8f0ff; color: var(--blue); }
+    .pill.WP  { background: #fff3e0; color: var(--amber); }
+    .pill.PK  { background: #fff3e0; color: var(--amber); }
+    .pill.SH  { background: #e6f7f2; color: var(--green); }
+    .pill.DL  { background: #e6f7f2; color: var(--green); }
+    .pill.IC  { background: #ffecec; color: var(--red); }
+    .pill.UNK { background: #eee; color: var(--muted); }
+    .detail td { background: #fcfcfd; }
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 24px; margin-bottom: 14px; }
+    .detail-grid div { font-size: 13px; }
+    .detail-grid label { display:block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing:.4px; margin-bottom:2px; }
+    .lines { width: 100%; border-collapse: collapse; }
+    .lines th, .lines td { border-bottom: 1px solid var(--line); font-size: 12px; padding: 8px 10px; }
+    .pager { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 18px 0 4px; }
+    .empty, .error { text-align: center; padding: 40px; color: var(--muted); }
+    .error { color: var(--red); }
+    .spin { display:inline-block; width:14px; height:14px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; vertical-align:-2px; margin-right:6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .live-dot { width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;vertical-align:1px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">MYNTRA <span>Orders</span><small>Warehouse · EXPERIENCES.DIGITAL</small></div>
+    <div class="spacer"></div>
+    <div class="meta" id="meta"><span class="live-dot"></span>Live from Myntra</div>
+  </header>
+
+  <div class="controls">
+    <label class="meta" for="status">Status</label>
+    <select id="status">
+      <option value="">All statuses</option>
+      <option value="RFR">New (Ready for Review)</option>
+      <option value="WP">In Progress</option>
+      <option value="PK">Packed</option>
+      <option value="SH">Shipped</option>
+      <option value="DL">Delivered</option>
+      <option value="IC">Cancelled</option>
+    </select>
+    <button class="primary" id="refresh">↻ Refresh</button>
+    <label class="meta" style="margin-left:auto;">
+      <input type="checkbox" id="auto" /> Auto-refresh 60s
+    </label>
+  </div>
+
+  <div class="wrap">
+    <div id="status-bar" class="meta" style="margin-bottom:10px;"></div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:160px;">Order ID</th>
+          <th>Seller Order ID</th>
+          <th style="width:90px;">Lines</th>
+          <th style="width:200px;">Status</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="4" class="empty">Loading…</td></tr>
+      </tbody>
+    </table>
+
+    <div class="pager">
+      <button id="prev">← Prev</button>
+      <span class="meta" id="pageinfo">Page 1</span>
+      <button id="next">Next →</button>
+    </div>
+  </div>
+
+  <script>
+    // Preserve an optional ?key= gate across all API calls.
+    const KEY = new URLSearchParams(location.search).get('key');
+    const withKey = (url) => KEY ? url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(KEY) : url;
+
+    const STATUS_LABEL = {
+      RFR: 'New', WP: 'In Progress', PK: 'Packed', SH: 'Shipped', DL: 'Delivered', IC: 'Cancelled',
+    };
+    const labelFor = (code) => STATUS_LABEL[code] || (code || 'New');
+    const classFor = (code) => (STATUS_LABEL[code] ? code : (code ? 'UNK' : 'RFR'));
+
+    let page = 0;
+    let totalPages = 1;
+    let lastData = null;
+    const expanded = new Set();
+    const detailCache = {}; // sellerId -> detail object
+
+    const $ = (id) => document.getElementById(id);
+
+    function pill(code) {
+      return '<span class="pill ' + classFor(code) + '">' + labelFor(code) + '</span>';
+    }
+
+    function lineStatus(line) {
+      // List rows expose status only when not "new"; blank => RFR.
+      return line && line.status ? line.status : 'RFR';
+    }
+
+    async function load() {
+      const status = $('status').value;
+      $('refresh').disabled = true;
+      $('rows').innerHTML = '<tr><td colspan="4" class="empty"><span class="spin"></span>Fetching from Myntra…</td></tr>';
+      $('status-bar').textContent = '';
+      try {
+        let url = '/orders/api/list?page=' + page;
+        if (status) url += '&statusCode=' + encodeURIComponent(status);
+        const res = await fetch(withKey(url));
+        const data = await res.json();
+        if (!data.ok) {
+          $('rows').innerHTML = '<tr><td colspan="4" class="error">' +
+            (data.statusMessage || data.error || 'Myntra returned an error') + '</td></tr>';
+          return;
+        }
+        lastData = data;
+        render();
+      } catch (e) {
+        $('rows').innerHTML = '<tr><td colspan="4" class="error">Network error: ' + e.message + '</td></tr>';
+      } finally {
+        $('refresh').disabled = false;
+      }
+    }
+
+    function render() {
+      const data = lastData || {};
+      const orders = data.orders || [];
+      totalPages = data.pages || 1;
+      const now = new Date().toLocaleString();
+      $('status-bar').innerHTML = '<b>' + (data.totalCount ?? orders.length) + '</b> orders total · updated ' + now;
+      $('pageinfo').textContent = 'Page ' + (page + 1) + ' of ' + totalPages;
+      $('prev').disabled = page <= 0;
+      $('next').disabled = page >= totalPages - 1;
+
+      if (!orders.length) {
+        $('rows').innerHTML = '<tr><td colspan="4" class="empty">No orders for this filter.</td></tr>';
+        return;
+      }
+
+      const html = orders.map((o) => {
+        const lines = o.orderLines || [];
+        const code = lineStatus(lines[0]);
+        const sellerId = lines[0] ? lines[0].sellerOrderId : '';
+        const isOpen = expanded.has(sellerId);
+        let out = '<tr class="order-row" data-seller="' + sellerId + '">' +
+          '<td><b>' + o.orderId + '</b></td>' +
+          '<td class="mono">' + (sellerId || '—') + '</td>' +
+          '<td>' + lines.length + '</td>' +
+          '<td>' + pill(code) + '</td>' +
+          '</tr>';
+        if (isOpen) {
+          const cached = detailCache[sellerId];
+          const inner = cached
+            ? detailHtml(cached)
+            : '<span class="spin" style="border-color:#ccc;border-top-color:transparent"></span>Loading detail…';
+          out += '<tr class="detail"><td colspan="4"><div>' + inner + '</div></td></tr>';
+        }
+        return out;
+      }).join('');
+      $('rows').innerHTML = html;
+
+      document.querySelectorAll('.order-row').forEach((tr) => {
+        tr.addEventListener('click', () => toggleDetail(tr.dataset.seller));
+      });
+      // Fetch detail for any expanded row not yet cached.
+      expanded.forEach((sid) => { if (sid && !detailCache[sid]) loadDetail(sid); });
+    }
+
+    function toggleDetail(sellerId) {
+      if (!sellerId) return;
+      if (expanded.has(sellerId)) expanded.delete(sellerId);
+      else expanded.add(sellerId);
+      render();
+    }
+
+    async function loadDetail(sellerId) {
+      try {
+        const res = await fetch(withKey('/orders/api/detail/' + encodeURIComponent(sellerId)));
+        const data = await res.json();
+        if (data.ok) detailCache[sellerId] = data.detail;
+        if (expanded.has(sellerId)) render();
+      } catch (e) {
+        /* leave the spinner; next refresh retries */
+      }
+    }
+
+    function field(label, val) {
+      return '<div><label>' + label + '</label>' + (val == null || val === '' ? '—' : val) + '</div>';
+    }
+
+    function detailHtml(d) {
+      const lines = d.orderLineEntries || [];
+      const addr = [d.address, d.locality, d.city, d.stateName || d.state, d.zipcode].filter(Boolean).join(', ');
+      const grid =
+        '<div class="detail-grid">' +
+        field('Customer', d.receiverName) +
+        field('Mobile', d.mobile) +
+        field('Payment', (d.paymentMethod || '').toUpperCase()) +
+        field('Ship By', lines[0] && lines[0].shipByTime) +
+        field('Address', addr) +
+        '</div>';
+      const rows = lines.map((l) =>
+        '<tr>' +
+        '<td><b>' + (l.sku || '—') + '</b></td>' +
+        '<td>' + (l.orderLineId || '') + '</td>' +
+        '<td>₹' + (l.lineFinalAmount ?? l.mrp ?? '—') + '</td>' +
+        '<td>' + pill(l.status_code) + '</td>' +
+        '<td>' + (l.packetId || '—') + '</td>' +
+        '<td>' + (l.invoiceNumber || '—') + '</td>' +
+        (l.cancellationReason ? '<td class="mono">' + l.cancellationReason + '</td>' : '<td>—</td>') +
+        '</tr>'
+      ).join('');
+      return grid +
+        '<table class="lines"><thead><tr>' +
+        '<th>SKU</th><th>Line ID</th><th>Amount</th><th>Status</th><th>Packet</th><th>Invoice</th><th>Note</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    $('refresh').addEventListener('click', () => load());
+    $('status').addEventListener('change', () => { page = 0; load(); });
+    $('prev').addEventListener('click', () => { if (page > 0) { page--; load(); } });
+    $('next').addEventListener('click', () => { if (page < totalPages - 1) { page++; load(); } });
+
+    let autoTimer = null;
+    $('auto').addEventListener('change', (e) => {
+      if (e.target.checked) autoTimer = setInterval(load, 60000);
+      else clearInterval(autoTimer);
+    });
+
+    load();
+  </script>
+</body>
+</html>

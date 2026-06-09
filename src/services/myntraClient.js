@@ -25,12 +25,24 @@ async function requestJson(url, options) {
   } catch (_error) {
     body = { raw: text };
   }
-  return { status: response.status, body };
+  return { status: response.status, body, headers: response.headers };
+}
+
+// JWT exp claim (seconds) -> ms, so we can refresh just before Myntra expires the token.
+function jwtExpiryMs(token) {
+  try {
+    const payload = token.split('.')[1];
+    const json = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (payload && Number.isFinite(Number(json.exp))) return Number(json.exp) * 1000;
+  } catch (_error) {
+    // fall through to default below
+  }
+  return null;
 }
 
 async function generateToken() {
   assertConfigured();
-  const { status, body } = await requestJson(`${env.myntraApiBase}/authorization/generate_token`, {
+  const { status, body, headers } = await requestJson(`${env.myntraApiBase}/authorization/generate_token`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -39,15 +51,20 @@ async function generateToken() {
     body: JSON.stringify({ merchant_id: env.myntraMerchantId }),
   });
 
-  if (status !== 200 || !body.access_token) {
+  // Myntra returns the JWT in the access_token RESPONSE HEADER, not the body.
+  const accessToken = headers.get('access_token');
+  const refreshToken = headers.get('refresh_token');
+
+  if (status !== 200 || !accessToken) {
     throw new AppError(2006, `Myntra token generation failed (HTTP ${status}): ${body.statusMessage || body.message || 'unknown error'}`);
   }
 
+  const expFromJwt = jwtExpiryMs(accessToken);
   cachedToken = {
-    accessToken: body.access_token,
-    refreshToken: body.refresh_token || null,
-    // Refresh 60s before expiry; default to 55 minutes when expires_in is absent.
-    expiresAtMs: Date.now() + (Number(body.expires_in) || 3300) * 1000 - 60 * 1000,
+    accessToken,
+    refreshToken: refreshToken || null,
+    // Refresh 60s before the JWT's own expiry; default to 55 minutes if it can't be read.
+    expiresAtMs: (expFromJwt || Date.now() + 3300 * 1000) - 60 * 1000,
   };
   return cachedToken;
 }
@@ -72,7 +89,7 @@ async function myntraGet(path, query) {
     headers: {
       'Content-Type': 'application/json',
       access_token: accessToken,
-      'x-partner-store': 'MYNTRA',
+      'x-partner-store': env.myntraPartnerStore,
     },
   });
 
@@ -85,7 +102,7 @@ async function myntraGet(path, query) {
       headers: {
         'Content-Type': 'application/json',
         access_token: retryToken,
-        'x-partner-store': 'MYNTRA',
+        'x-partner-store': env.myntraPartnerStore,
       },
     });
     return retry;

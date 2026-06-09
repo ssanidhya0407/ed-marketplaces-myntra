@@ -12,6 +12,7 @@ const notFoundHandler = require('./middleware/notFound');
 const errorHandler = require('./middleware/errorHandler');
 const partnerStoreHeaderMiddleware = require('./middleware/partnerStore');
 const requestTimeoutMiddleware = require('./middleware/requestTimeout');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 const app = express();
 const AUTH_BYPASS_PATHS = new Set(['/health', '/authorization/generate_token', '/authorization/refresh_token']);
@@ -42,6 +43,10 @@ app.use(
     legacyHeaders: false,
   }),
 );
+
+// Warehouse-facing orders dashboard — mounted before the access_token gate so the
+// team can open it in a browser. It reads live from Myntra using server-held creds.
+app.use(dashboardRoutes);
 
 const auth = authMiddleware(env);
 app.use((req, res, next) => {
