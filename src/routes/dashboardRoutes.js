@@ -62,6 +62,90 @@ router.get('/orders/api/detail/:sellerOrderId', dashboardGate, async (req, res) 
   }
 });
 
+// Myntra returns documents as a multipart/related envelope wrapping the raw PDF.
+// Pull the PDF bytes out: from the first "%PDF" to the final "%%EOF".
+function extractPdf(buffer) {
+  const start = buffer.indexOf('%PDF');
+  if (start === -1) return null;
+  const eof = buffer.lastIndexOf('%%EOF');
+  const end = eof === -1 ? buffer.length : eof + 5;
+  return buffer.subarray(start, end);
+}
+
+function streamDocument(res, kind, packetId, status, buffer) {
+  const pdf = buffer && extractPdf(buffer);
+  if (status !== 200 || !pdf) {
+    const detail = buffer ? buffer.toString('utf8').slice(0, 500) : '';
+    return res.status(status === 200 ? 502 : status).json({
+      ok: false,
+      error: detail || `Myntra returned HTTP ${status}`,
+    });
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${kind}_${packetId}.pdf"`);
+  return res.send(pdf);
+}
+
+// PDF: stream a packet's shipping label straight from Myntra to the browser.
+router.get('/orders/api/label/:packetId', dashboardGate, async (req, res) => {
+  try {
+    const { status, buffer } = await myntraClient.fetchShippingLabel(req.params.packetId);
+    return streamDocument(res, 'label', req.params.packetId, status, buffer);
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// PDF: stream a packet's invoice.
+router.get('/orders/api/invoice/:packetId', dashboardGate, async (req, res) => {
+  try {
+    const { status, buffer } = await myntraClient.fetchInvoice(req.params.packetId);
+    return streamDocument(res, 'invoice', req.params.packetId, status, buffer);
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Status change: accept | reject | cancel | ready_to_ship | ready_to_dispatch.
+// Mutates the live Myntra account — the UI confirms before calling this.
+router.post('/orders/api/action/:sellerOrderId', dashboardGate, async (req, res) => {
+  const sellerOrderId = req.params.sellerOrderId;
+  const { action, orderLineIds, warehouse, comment, trackingNo, orderLineEntries } = req.body || {};
+  try {
+    let result;
+    switch (String(action || '').toLowerCase()) {
+      case 'accept':
+        result = await myntraClient.updateOrderEvent(sellerOrderId, 'ACCEPT', { warehouse, orderLineIds });
+        break;
+      case 'reject':
+        result = await myntraClient.updateOrderEvent(sellerOrderId, 'REJECT', { warehouse, orderLineIds });
+        break;
+      case 'cancel':
+        result = await myntraClient.cancelOrderItems(sellerOrderId, { orderLineIds, comment });
+        break;
+      case 'ready_to_ship':
+        result = await myntraClient.markReadyToShip(trackingNo);
+        break;
+      case 'ready_to_dispatch':
+        result = await myntraClient.markReadyToDispatch({ warehouse, orderLineEntries });
+        break;
+      default:
+        return res.status(400).json({ ok: false, error: `Unknown action: ${action}` });
+    }
+    const body = result.body || {};
+    return res.status(result.status === 200 ? 200 : 502).json({
+      ok: result.status === 200 && body.statusType !== 'ERROR',
+      httpStatus: result.status,
+      statusCode: body.statusCode ?? null,
+      message: body.statusMessage || body.message || null,
+      raw: body,
+    });
+  } catch (error) {
+    return res.status(error.statusCode && error.statusCode < 600 ? 400 : 500)
+      .json({ ok: false, error: error.message });
+  }
+});
+
 router.get('/orders/api/status-labels', (_req, res) => res.json(STATUS_LABELS));
 
 module.exports = router;
