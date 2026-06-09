@@ -212,10 +212,14 @@
     function detailHtml(d, sellerId) {
       const lines = d.orderLineEntries || [];
       const addr = [d.address, d.locality, d.city, d.stateName || d.state, d.zipcode].filter(Boolean).join(', ');
+      const l0 = lines[0] || {};
       const grid = '<div class="detail-grid">' +
         field('Customer', d.receiverName) + field('Mobile', d.mobile) +
         field('Payment', (d.paymentMethod || '').toUpperCase()) +
-        field('Ship By', lines[0] && lines[0].shipByTime) + field('Address', addr) + '</div>';
+        field('Order Placed', l0.shipByTime) +
+        field('Pack By', l0.packByTime) +
+        field('Deliver By', l0.customerPromiseTime) +
+        field('Address', addr) + '</div>';
 
       const rows = lines.map((l) => {
         const pkt = l.packetId || '';
@@ -234,13 +238,28 @@
 
       const sid = JSON.stringify(sellerId);
       const trackingNo = (lines.find((l) => l.trackingNumber) || {}).trackingNumber || '';
+      // Drive the buttons off the order's current Myntra state. PPMP has no seller
+      // "accept" (Myntra auto-accepts RFR -> WP), so that button is intentionally gone.
+      const st = (lines[0] && lines[0].status_code) || 'RFR';
+      const FLOW = {
+        RFR: '🆕 New order — Myntra auto-accepts it to “In Progress”. No action needed yet; Ready to Dispatch unlocks once it reaches In Progress.',
+        WP:  '⚙️ In Progress — click Ready to Dispatch to pack &amp; invoice it.',
+        PK:  '📦 Packed — print the Label &amp; Invoice below, then click Ready to Ship with the tracking number.',
+        SH:  '🚚 Shipped — fulfilment complete.',
+        DL:  '✅ Delivered.',
+        IC:  '⊘ Cancelled.',
+      };
+      const can = { rtd: st === 'WP', rts: st === 'PK', reject: st === 'RFR', cancel: st === 'RFR' || st === 'WP' };
+      const btn = (cls, action, label, ok, extra) =>
+        '<button class="btn-sm ' + cls + '"' +
+        (ok ? '' : ' disabled title="Not available while order is ' + (STATUS_LABEL[st] || st) + '"') +
+        ' onclick=\'act(' + sid + ',"' + action + '"' + (extra || '') + ')\'>' + label + '</button>';
       const actions = '<div class="actions">' +
-        '<span class="sect">Status change</span>' +
-        '<button class="btn-sm btn-accept" onclick=\'act(' + sid + ',"accept")\'>✓ Accept</button>' +
-        '<button class="btn-sm btn-reject" onclick=\'act(' + sid + ',"reject")\'>✕ Reject</button>' +
-        '<button class="btn-sm btn-rtd"    onclick=\'act(' + sid + ',"ready_to_dispatch")\'>📦 Ready to Dispatch</button>' +
-        '<button class="btn-sm btn-ship"   onclick=\'act(' + sid + ',"ready_to_ship",' + JSON.stringify(trackingNo) + ')\'>🚚 Ready to Ship</button>' +
-        '<button class="btn-sm btn-cancel" onclick=\'act(' + sid + ',"cancel")\'>⊘ Cancel</button>' +
+        '<span class="sect" style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);flex-basis:100%;margin-bottom:4px;">' + (FLOW[st] || ('Status: ' + (STATUS_LABEL[st] || st))) + '</span>' +
+        btn('btn-rtd', 'ready_to_dispatch', '📦 Ready to Dispatch', can.rtd) +
+        btn('btn-ship', 'ready_to_ship', '🚚 Ready to Ship', can.rts, ',' + JSON.stringify(trackingNo)) +
+        btn('btn-reject', 'reject', '✕ Reject', can.reject) +
+        btn('btn-cancel', 'cancel', '⊘ Cancel', can.cancel) +
         '</div>';
 
       return grid + actions +
@@ -263,7 +282,18 @@
         if (!tn) return; body.trackingNo = tn;
       }
       if (action === 'ready_to_dispatch') {
-        body.orderLineEntries = lines.map((l) => ({ sellerOrderId: sellerId, orderLineId: l.orderLineId }));
+        // Myntra's RTD requires invoiceNumber + invoiceDate per line (see myntradeveloper.md).
+        // Reuse the order's own invoice when present; otherwise generate one (dd-MM-yyyy HH:mm:ss).
+        const now = new Date();
+        const p2 = (n) => String(n).padStart(2, '0');
+        const invDate = p2(now.getDate()) + '-' + p2(now.getMonth() + 1) + '-' + now.getFullYear() +
+          ' ' + p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds());
+        body.orderLineEntries = lines.map((l) => ({
+          sellerOrderId: sellerId,
+          orderLineId: l.orderLineId,
+          invoiceNumber: l.invoiceNumber || ('INV-' + l.orderLineId),
+          invoiceDate: l.invoiceDate || invDate,
+        }));
       }
       if (!confirm('This will ' + labels[action] + ' on the LIVE Myntra account for order ' + sellerId + '.\n\nProceed?')) return;
 
