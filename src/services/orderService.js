@@ -109,44 +109,77 @@ function updateOrder({ params, body }) {
   const ev = String(params.eventType || '').toLowerCase();
   const order = db.orders.get(sellerOrderId);
 
-  // Acknowledge even if we don't have the order yet (Myntra still expects success).
+  // All Update Order success responses are statusCode 1008 per Myntra's spec.
   if (!order) {
-    return { code: 1000, overrideMessage: 'Order updated successfully', extraFields: { sellerOrderId, eventType: params.eventType, applied: false } };
+    return { code: 1008, overrideMessage: 'Order updated successfully', extraFields: { sellerOrderId, eventType: params.eventType, applied: false } };
   }
 
   const setStatus = (s) => { if (order.status !== s) { order.status = s; order.statusHistory.push(s); } };
-  const ok = (code = 1000) => { db.markDirty(); return { code, overrideMessage: 'Order updated successfully', extraFields: serializeOrder(order) }; };
+  const ok = () => { db.markDirty(); return { code: 1008, overrideMessage: 'Order updated successfully', extraFields: serializeOrder(order) }; };
+  const cancelLines = (entries) => {
+    for (const e of entries || []) { const line = order.lineMap.get(String(e.orderLineId)); if (line) { line.cancelled = true; if (e.cancellationReason || e.comment) line.cancellationReason = e.cancellationReason || e.comment; } }
+    if (order.lineMap.size && Array.from(order.lineMap.values()).every((l) => l.cancelled)) setStatus('CANCELLED');
+  };
 
   switch (ev) {
-    case 'accept': setStatus('ACCEPTED'); return ok(1000);
-    case 'reject': setStatus('REJECTED'); return ok(1000);
+    case 'accept': setStatus('ACCEPTED'); return ok();
+    case 'reject': setStatus('REJECTED'); return ok();
     case 'pack':
-    case 'readytodispatch': setStatus('READY_TO_DISPATCH'); return ok(1000);
+    case 'readytodispatch': setStatus('READY_TO_DISPATCH'); return ok();
     case 'shipped':
       if (body.trackingNumber) order.trackingNumber = String(body.trackingNumber);
       if (body.courier || body.courierCode) order.courier = String(body.courier || body.courierCode);
-      setStatus('SHIPPED'); return ok(1009);
-    case 'delivered': setStatus('DELIVERED'); return ok(1000);
-    case 'onhold': setStatus('ON_HOLD'); return ok(1000);
-    case 'unhold': setStatus('ACCEPTED'); return ok(1000);
+      setStatus('SHIPPED'); return ok();
+    case 'delivered': setStatus('DELIVERED'); return ok();
+    case 'lost': setStatus('LOST'); return ok();
+    case 'onhold': setStatus('ON_HOLD'); return ok();
+    case 'unhold': setStatus('ACCEPTED'); return ok();
     case 'trackingnumberupdate':
       if (body.trackingNumber) order.trackingNumber = String(body.trackingNumber);
       if (body.courier || body.courierCode) order.courier = String(body.courier || body.courierCode);
-      return ok(1000);
+      return ok();
     case 'reassignreleaseupdate':
+    case 'assignmentupdate':
+      for (const e of body.orderLineEntries || []) { const line = order.lineMap.get(String(e.orderLineId)); if (line && e.warehouse) line.warehouse = String(e.warehouse); }
       if (body.warehouse) order.warehouse = String(body.warehouse);
-      return ok(1000);
+      return ok();
+    case 'repromise': // SLA times refreshed
+      for (const e of body.orderLineEntries || []) {
+        const line = order.lineMap.get(String(e.orderLineId));
+        if (line) { ['packByTime', 'acceptByTime', 'processingStartTime', 'customerPromiseTime'].forEach((k) => { if (e[k]) line[k] = e[k]; }); }
+      }
+      return ok();
     case 'itemcancellation':
-    case 'cancelitems': {
-      const entries = Array.isArray(body.orderLineEntries) ? body.orderLineEntries : [];
-      for (const e of entries) { const line = order.lineMap.get(String(e.orderLineId)); if (line) line.cancelled = true; }
-      if (order.lineMap.size && Array.from(order.lineMap.values()).every((l) => l.cancelled)) setStatus('CANCELLED');
-      return ok(1004);
-    }
-    case 'lost': setStatus('LOST'); return ok(1000);
+    case 'cancelitems':
+    case 'vfs': // Vendor Failed to Supply
+      cancelLines(body.orderLineEntries);
+      return ok();
     // itemBlock / itemNsts / itemXPacked / anything else → acknowledge without failing.
-    default: return ok(1000);
+    default: return ok();
   }
+}
+
+// Packet-level events (after RTD): shipped, delivered, lost — PUT /storefront/v4/packet/:packetId/:eventType.
+function updatePacket({ params, body }) {
+  const { packetId } = params;
+  const ev = String(params.eventType || '').toLowerCase();
+  let order = null;
+  const p = db.packets.get(packetId);
+  if (p) order = db.orders.get(p.sellerOrderId);
+  if (!order) { for (const o of db.orders.values()) { if (o.packetId === packetId) { order = o; break; } } }
+
+  if (!order) {
+    return { code: 1008, overrideMessage: 'Order updated successfully', extraFields: { packetId, eventType: params.eventType, applied: false } };
+  }
+  const setStatus = (s) => { if (order.status !== s) { order.status = s; order.statusHistory.push(s); } };
+  if (ev === 'shipped') {
+    if (body.trackingNumber) order.trackingNumber = String(body.trackingNumber);
+    if (body.courier || body.courierCode) order.courier = String(body.courier || body.courierCode);
+    setStatus('SHIPPED');
+  } else if (ev === 'delivered') setStatus('DELIVERED');
+  else if (ev === 'lost') setStatus('LOST');
+  db.markDirty();
+  return { code: 1008, overrideMessage: 'Order updated successfully', extraFields: serializeOrder(order) };
 }
 
 // Myntra fetches the seller-generated invoice here and expects a PDF byte stream.
@@ -254,6 +287,7 @@ function getPacketById({ params }) {
 module.exports = {
   createOrder,
   updateOrder,
+  updatePacket,
   downloadInvoice,
   getOrderById,
   getOrderList,
