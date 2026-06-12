@@ -37,8 +37,14 @@ export const api = {
     return getJson('/orders/api/inbox/returns');
   },
   statusLabels() { return getJson('/orders/api/status-labels'); },
-  labelUrl(packetId: string) { return withKey(`/orders/api/label/${encodeURIComponent(packetId)}`); },
-  invoiceUrl(packetId: string) { return withKey(`/orders/api/invoice/${encodeURIComponent(packetId)}`); },
+  labelUrl(packetId: string, source: 'live' | 'inbox' = 'live') {
+    const base = source === 'inbox' ? '/orders/api/inbox/label' : '/orders/api/label';
+    return withKey(`${base}/${encodeURIComponent(packetId)}`);
+  },
+  invoiceUrl(packetId: string, source: 'live' | 'inbox' = 'live') {
+    const base = source === 'inbox' ? '/orders/api/inbox/invoice' : '/orders/api/invoice';
+    return withKey(`${base}/${encodeURIComponent(packetId)}`);
+  },
   async action(sellerOrderId: string, body: Record<string, unknown>): Promise<any> {
     const res = await fetch(withKey(`/orders/api/action/${encodeURIComponent(sellerOrderId)}`), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

@@ -267,10 +267,10 @@ export default function OrderDetailModal({
                         <td className="px-3 py-2">
                           {l.packetId ? (
                             <div className="flex gap-2">
-                              <a href={api.labelUrl(l.packetId)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+                              <a href={api.labelUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
                                 <Download size={11} /> Label
                               </a>
-                              <a href={api.invoiceUrl(l.packetId)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+                              <a href={api.invoiceUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
                                 <FileText size={11} /> Invoice
                               </a>
                             </div>

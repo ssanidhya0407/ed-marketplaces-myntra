@@ -4,6 +4,7 @@ const path = require('path');
 const env = require('../config/env');
 const myntraClient = require('../services/myntraClient');
 const db = require('../db/mockDb');
+const { buildPdf } = require('../utils/miniPdf');
 
 const router = express.Router();
 
@@ -212,6 +213,41 @@ router.get('/orders/api/inbox/detail/:sellerOrderId', dashboardGate, (req, res) 
   if (!o || !isPush(o)) return res.json({ ok: false, error: 'Order not found in inbox' });
   res.json({ ok: true, detail: inboxDetail(o) });
 });
+
+// Inbox documents are served from the LOCAL store (these packets aren't in Myntra).
+function findByPacket(packetId) {
+  const p = db.packets.get(packetId);
+  if (p && db.orders.has(p.sellerOrderId)) { const o = db.orders.get(p.sellerOrderId); if (isPush(o)) return o; }
+  for (const o of db.orders.values()) { if (isPush(o) && o.packetId === packetId) return o; }
+  return null;
+}
+function sendInboxPdf(res, kind, packetId) {
+  const o = findByPacket(packetId);
+  if (!o) return res.status(404).json({ ok: false, error: 'No packet for this order in inbox' });
+  const r = o.receiver || {};
+  const l = lines(o)[0] || {};
+  const tax = (l.taxEntries && l.taxEntries[0]) || {};
+  const pdf = kind === 'label'
+    ? buildPdf('MYNTRA — Shipping Label', [
+      `Packet: ${o.packetId}`, `Tracking: ${o.trackingNumber || '—'}  (${o.courier || '—'})`,
+      `Order: ${o.sellerOrderId}`, '',
+      `Deliver to: ${r.receiverName || '—'}`, `${r.address || ''}, ${r.locality || ''}`,
+      `${r.city || ''}, ${r.stateName || r.state || ''} ${r.zipcode || ''}`, `${r.country || ''}   Ph: ${r.mobile || ''}`,
+      '', `SKU: ${l.sku || '—'}   Qty: ${l.quantity ?? 1}`, `Warehouse: ${l.warehouse || o.warehouse || '—'}`,
+    ])
+    : buildPdf('Tax Invoice', [
+      `Invoice No: ${l.invoiceNumber || '—'}    Date: ${l.invoiceDate || '—'}`,
+      `Order: ${o.sellerOrderId}    Packet: ${o.packetId}`, '',
+      `Item: ${l.sku || '—'}`, `Amount: INR ${l.lineFinalAmount ?? '—'}`,
+      `${tax.taxType || 'GST'} @ ${tax.taxRate || 0}%: INR ${tax.unitTaxAmount ?? '—'}`,
+      '', 'Seller: EXPERIENCES.DIGITAL PRIVATE LIMITED',
+    ]);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${kind}_${packetId}.pdf"`);
+  return res.send(pdf);
+}
+router.get('/orders/api/inbox/label/:packetId', dashboardGate, (req, res) => sendInboxPdf(res, 'label', req.params.packetId));
+router.get('/orders/api/inbox/invoice/:packetId', dashboardGate, (req, res) => sendInboxPdf(res, 'invoice', req.params.packetId));
 
 router.get('/orders/api/inbox/returns', dashboardGate, (_req, res) => {
   const returns = [];

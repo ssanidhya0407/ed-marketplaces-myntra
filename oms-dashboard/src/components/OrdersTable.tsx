@@ -18,16 +18,16 @@ function Thumb({ image }: { image: string | null | undefined }) {
   );
 }
 
-function DocsCell({ d }: { d: RowDetail | undefined }) {
+function DocsCell({ d, source }: { d: RowDetail | undefined; source: 'live' | 'inbox' }) {
   if (d === undefined) return <Loader2 size={13} className="animate-spin text-zinc-300" />;
   if (!d.packetId) return <span className="text-[11px] text-zinc-300">—</span>;
   return (
     <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-      <a href={api.labelUrl(d.packetId)} target="_blank" rel="noreferrer"
+      <a href={api.labelUrl(d.packetId, source)} target="_blank" rel="noreferrer"
         className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors">
         <Download size={11} /> Label
       </a>
-      <a href={api.invoiceUrl(d.packetId)} target="_blank" rel="noreferrer"
+      <a href={api.invoiceUrl(d.packetId, source)} target="_blank" rel="noreferrer"
         className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-md transition-colors">
         <FileText size={11} /> Invoice
       </a>
@@ -36,12 +36,13 @@ function DocsCell({ d }: { d: RowDetail | undefined }) {
 }
 
 export default function OrdersTable({
-  orders, onSelect, highlightIds, details,
+  orders, onSelect, highlightIds, details, source = 'live',
 }: {
   orders: OrderSummary[];
   onSelect: (sellerOrderId: string) => void;
   highlightIds?: Set<string>;
   details?: Record<string, RowDetail | undefined>;
+  source?: 'live' | 'inbox';
 }) {
   return (
     <div className="overflow-x-auto">
@@ -90,7 +91,7 @@ export default function OrdersTable({
                   {d === undefined ? <span className="text-zinc-300 font-normal">…</span> : (d.amount != null ? formatINR(d.amount) : '—')}
                 </td>
                 <td className="px-4 py-3"><StatusBadge code={d?.status ?? line?.status} /></td>
-                <td className="px-4 py-3"><DocsCell d={d} /></td>
+                <td className="px-4 py-3"><DocsCell d={d} source={source} /></td>
                 <td className="px-4 py-3 text-zinc-300 group-hover:text-indigo-400 transition-colors"><ChevronRight size={16} /></td>
               </tr>
             );

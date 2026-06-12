@@ -60,7 +60,7 @@ export default function InboxPage() {
         {!loading && !error && (
           orders.length === 0
             ? <div className="px-4 py-16 text-center text-sm text-zinc-500">No orders pushed yet. They appear here the moment Myntra calls your <code className="font-mono text-zinc-600">/storefront/v4/order</code> webhook.</div>
-            : <OrdersTable orders={orders} onSelect={setSelected} details={details} />
+            : <OrdersTable orders={orders} onSelect={setSelected} details={details} source="inbox" />
         )}
       </div>
 
