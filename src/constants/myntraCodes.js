@@ -5,6 +5,8 @@ const SUCCESS_RESPONSES = {
   1004: { statusCode: 1004, statusMessage: 'Items cancelled successfully', statusType: 'SUCCESS' },
   1005: { statusCode: 1005, statusMessage: 'Order retrieved successfully', statusType: 'SUCCESS' },
   1006: { statusCode: 1006, statusMessage: 'Discounts processed successfully', statusType: 'SUCCESS' },
+  // 1008 is the documented success code for Update Order / Update Return webhooks.
+  1008: { statusCode: 1008, statusMessage: 'Order updated successfully', statusType: 'SUCCESS' },
   1009: { statusCode: 1009, statusMessage: 'Shipments verified successfully', statusType: 'SUCCESS' },
 };
 

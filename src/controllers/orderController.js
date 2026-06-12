@@ -25,6 +25,18 @@ function updateOrder(req, res, next) {
   }
 }
 
+function updatePacket(req, res, next) {
+  try {
+    const result = orderService.updatePacket(req.validated);
+    return sendSuccess(req, res, result.code, {
+      overrideMessage: result.overrideMessage,
+      extraFields: result.extraFields,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 function downloadInvoice(req, res, next) {
   try {
     const result = orderService.downloadInvoice(req.validated);
@@ -69,6 +81,7 @@ function getPacketById(req, res, next) {
 module.exports = {
   createOrder,
   updateOrder,
+  updatePacket,
   downloadInvoice,
   getOrderById,
   getPacketById,

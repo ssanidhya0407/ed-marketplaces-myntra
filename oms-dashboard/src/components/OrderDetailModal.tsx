@@ -13,8 +13,8 @@ import StatusBadge from './StatusBadge';
 import { useNotifications } from './NotificationProvider';
 
 export default function OrderDetailModal({
-  sellerOrderId, onClose, onMutated,
-}: { sellerOrderId: string; onClose: () => void; onMutated?: () => void }) {
+  sellerOrderId, onClose, onMutated, source = 'live',
+}: { sellerOrderId: string; onClose: () => void; onMutated?: () => void; source?: 'live' | 'inbox' }) {
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<ActionKey | null>(null);
@@ -31,7 +31,7 @@ export default function OrderDetailModal({
 
   async function fetchDetail() {
     setLoading(true);
-    const res = await api.orderDetail(sellerOrderId);
+    const res = await api.orderDetail(sellerOrderId, source);
     setDetail(res.ok ? res.detail : { _error: res.error || (res as any).statusMessage || 'Failed to load order' });
     setLoading(false);
   }

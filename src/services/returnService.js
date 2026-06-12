@@ -44,7 +44,7 @@ function updateReturn({ params, body }) {
   db.markDirty();
 
   return {
-    code: 1000,
+    code: 1008,
     overrideMessage: 'Return Updated Successfully',
     extraFields: { returnId: id, sellerOrderId: existing.sellerOrderId || null, status: existing.status || null, type: existing.type || null },
   };

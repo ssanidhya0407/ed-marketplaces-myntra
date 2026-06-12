@@ -3,8 +3,50 @@ const path = require('path');
 
 const env = require('../config/env');
 const myntraClient = require('../services/myntraClient');
+const db = require('../db/mockDb');
 
 const router = express.Router();
+
+// Internal order status -> Myntra order-list status code.
+const INTERNAL_TO_CODE = {
+  CREATED: 'RFR', ACCEPTED: 'WP', ON_HOLD: 'WP', READY_TO_DISPATCH: 'PK',
+  SHIPPED: 'SH', LOST: 'SH', DELIVERED: 'DL', CANCELLED: 'IC', REJECTED: 'IC',
+};
+const isPush = (o) => o && o.source === 'push';
+const lines = (o) => Array.from(o.lineMap.values());
+
+function inboxSummary(o) {
+  return {
+    orderId: o.sellerOrderId,
+    orderLines: lines(o).map((l) => ({
+      orderLineId: String(l.orderLineId),
+      sellerOrderId: o.sellerOrderId,
+      status: l.cancelled ? 'IC' : (INTERNAL_TO_CODE[o.status] || o.status),
+    })),
+  };
+}
+function inboxDetail(o) {
+  const code = INTERNAL_TO_CODE[o.status] || o.status;
+  const r = o.receiver || {};
+  return {
+    statusCode: 1005, statusMessage: 'Order retrieved successfully', statusType: 'SUCCESS',
+    sellerOrderId: o.sellerOrderId,
+    receiverName: r.receiverName, address: r.address, locality: r.locality, city: r.city,
+    state: r.state, stateName: r.stateName, zipcode: r.zipcode, country: r.country,
+    mobile: r.mobile, email: r.email, paymentMethod: o.paymentMethod, warehouse: o.warehouse,
+    trackingNumber: o.trackingNumber || null,
+    orderLineEntries: lines(o).map((l) => ({
+      orderLineId: String(l.orderLineId), sku: l.sku, warehouse: l.warehouse || o.warehouse,
+      mrp: l.mrp, lineFinalAmount: l.lineFinalAmount,
+      status_code: l.cancelled ? 'IC' : code,
+      packetId: ['PK', 'SH', 'DL'].includes(code) ? o.packetId : (l.packetId || null),
+      invoiceNumber: l.invoiceNumber || null, invoiceDate: l.invoiceDate || null,
+      trackingNumber: o.trackingNumber || null, taxEntries: l.taxEntries || [],
+      shipByTime: l.shipByTime, packByTime: l.packByTime, customerPromiseTime: l.customerPromiseTime,
+      cancellationReason: l.cancellationReason || null,
+    })),
+  };
+}
 
 // Optional light gate: if DASHBOARD_KEY is set, the page/API require ?key=<value>.
 // Left open by default so the warehouse team can just open the URL.
@@ -149,5 +191,39 @@ router.post('/orders/api/action/:sellerOrderId', dashboardGate, async (req, res)
 });
 
 router.get('/orders/api/status-labels', (_req, res) => res.json(STATUS_LABELS));
+
+// ───────── Inbox: orders & returns Myntra PUSHED to our webhook (local store) ─────────
+// Real-time work queue, independent of getOrderList. Status-change actions still hit the
+// live Myntra API (these are real Myntra orders) via /orders/api/action.
+router.get('/orders/api/inbox/list', dashboardGate, (req, res) => {
+  const wanted = req.query.statusCode ? String(req.query.statusCode).toUpperCase() : null;
+  const orders = [];
+  for (const o of db.orders.values()) {
+    if (!isPush(o)) continue;
+    const s = inboxSummary(o);
+    if (wanted && s.orderLines[0] && s.orderLines[0].status !== wanted) continue;
+    orders.push(s);
+  }
+  res.json({ ok: true, page: 0, totalCount: orders.length, pages: 1, orders });
+});
+
+router.get('/orders/api/inbox/detail/:sellerOrderId', dashboardGate, (req, res) => {
+  const o = db.orders.get(req.params.sellerOrderId);
+  if (!o || !isPush(o)) return res.json({ ok: false, error: 'Order not found in inbox' });
+  res.json({ ok: true, detail: inboxDetail(o) });
+});
+
+router.get('/orders/api/inbox/returns', dashboardGate, (_req, res) => {
+  const returns = [];
+  for (const r of db.returns.values()) {
+    returns.push({
+      id: r.id, type: r.type || null, status: r.status || null,
+      sellerOrderId: r.sellerOrderId || null, orderLineId: r.orderLineId || null,
+      trackingNumber: r.trackingNumber || null, reason: r.reason || null,
+      returnWarehouseCode: r.returnWarehouseCode || null, createdOn: r.createdOn || null,
+    });
+  }
+  res.json({ ok: true, totalCount: returns.length, returns });
+});
 
 module.exports = router;
