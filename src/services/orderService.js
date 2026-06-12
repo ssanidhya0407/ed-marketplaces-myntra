@@ -43,47 +43,60 @@ function ensureValidSkus(orderLineEntries) {
   }
 }
 
+// Inbound webhook: Myntra pushes a (released) order to us. We accept the real payload as-is
+// — no mock store/SKU validation — honour the pushed status, and treat duplicates as success
+// (per Myntra spec: "Api will return success in case of duplicate order as well").
 function createOrder({ params, body }) {
   const sellerOrderId = params.sellerOrderId;
   if (body.sellerOrderId && body.sellerOrderId !== sellerOrderId) {
     throw new AppError(2034);
   }
 
-  if (!db.stores.has(body.warehouse)) {
-    throw new AppError(2063);
-  }
-
-  ensureValidSkus(body.orderLineEntries);
+  const success = (order) => ({
+    code: 1006,
+    overrideMessage: 'Order created successfully.',
+    extraFields: serializeOrder(order),
+  });
 
   if (db.orders.has(sellerOrderId)) {
-    throw new AppError(2005);
+    return success(db.orders.get(sellerOrderId)); // duplicate push → SUCCESS
   }
 
-  const packetId = body.packetId || `PKT-${sellerOrderId}`;
-  const lineMap = new Map(body.orderLineEntries.map((line) => [String(line.orderLineId), { ...line, cancelled: false }]));
+  const lines = Array.isArray(body.orderLineEntries) ? body.orderLineEntries : [];
+  const warehouse = body.warehouse || lines.find((l) => l.warehouse)?.warehouse || null;
+  const packetId = body.packetId || lines.find((l) => l.packetId)?.packetId || `PKT-${sellerOrderId}`;
+
+  // Map Myntra's pushed order status -> internal status. WORK_IN_PROGRESS = released, seller-actionable.
+  const pushed = String(body.status || '').toUpperCase();
+  const status = pushed === 'WORK_IN_PROGRESS' ? 'ACCEPTED'
+    : pushed === 'CANCELLED' ? 'CANCELLED'
+      : 'CREATED';
+
+  const lineMap = new Map(
+    lines.map((line) => [String(line.orderLineId), { ...line, quantity: line.quantity ?? 1, cancelled: false }]),
+  );
 
   db.orders.set(sellerOrderId, {
+    source: 'push',
     sellerOrderId,
     packetId,
-    status: 'CREATED',
-    statusHistory: ['CREATED'],
-    warehouse: body.warehouse,
+    status,
+    statusHistory: [status],
+    warehouse,
+    eventName: body.eventName || null,
+    paymentMethod: body.paymentMethod || null,
+    receiver: {
+      receiverName: body.receiverName, address: body.address, locality: body.locality,
+      city: body.city, state: body.state, stateName: body.stateName,
+      zipcode: body.zipcode, country: body.country, mobile: body.mobile, email: body.email,
+    },
     payloadHash: hashPayload(body),
     createdOn: new Date().toISOString(),
     lineMap,
   });
-  db.packets.set(packetId, {
-    sellerOrderId,
-    packetId,
-    invoiceReady: true,
-    fileUrl: `https://files.alyajewels.com/myntra/invoices/${packetId}.pdf`,
-  });
+  db.packets.set(packetId, { sellerOrderId, packetId, invoiceReady: true });
 
-  return {
-    code: 1006,
-    overrideMessage: 'Order created successfully.',
-    extraFields: serializeOrder(db.orders.get(sellerOrderId)),
-  };
+  return success(db.orders.get(sellerOrderId));
 }
 
 function updateOrder({ params, body }) {
