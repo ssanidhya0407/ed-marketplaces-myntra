@@ -16,7 +16,7 @@ export interface RowDetail {
 
 const EMPTY: RowDetail = { packetId: null, sku: null, amount: null, image: null, qty: null, status: null };
 
-export function useRowDetails(orders: OrderSummary[]): Record<string, RowDetail | undefined> {
+export function useRowDetails(orders: OrderSummary[], source: 'live' | 'inbox' = 'live'): Record<string, RowDetail | undefined> {
   const [map, setMap] = useState<Record<string, RowDetail>>({});
   const cache = useRef<Record<string, RowDetail>>({});
 
@@ -39,7 +39,7 @@ export function useRowDetails(orders: OrderSummary[]): Record<string, RowDetail 
     Promise.all(
       todo.map(async (sid) => {
         try {
-          const d = await api.orderDetail(sid);
+          const d = await api.orderDetail(sid, source);
           if (d.ok) {
             const lines: any[] = d.detail?.orderLineEntries || [];
             const first = lines[0] || {};

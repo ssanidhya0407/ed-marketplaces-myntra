@@ -23,8 +23,18 @@ export const api = {
     if (startDate && endDate) url += `&startDate=${startDate}&endDate=${endDate}`;
     return getJson<ListResponse>(url);
   },
-  orderDetail(sellerOrderId: string): Promise<{ ok: boolean; detail: any; error?: string }> {
-    return getJson(`/orders/api/detail/${encodeURIComponent(sellerOrderId)}`);
+  orderDetail(sellerOrderId: string, source: 'live' | 'inbox' = 'live'): Promise<{ ok: boolean; detail: any; error?: string }> {
+    const base = source === 'inbox' ? '/orders/api/inbox/detail' : '/orders/api/detail';
+    return getJson(`${base}/${encodeURIComponent(sellerOrderId)}`);
+  },
+  // Inbox = orders/returns Myntra pushed to our webhook (local store), shown in real time.
+  inboxList(params: { statusCode?: string } = {}): Promise<ListResponse> {
+    let url = '/orders/api/inbox/list';
+    if (params.statusCode) url += `?statusCode=${encodeURIComponent(params.statusCode)}`;
+    return getJson<ListResponse>(url);
+  },
+  inboxReturns(): Promise<{ ok: boolean; totalCount: number; returns: any[] }> {
+    return getJson('/orders/api/inbox/returns');
   },
   statusLabels() { return getJson('/orders/api/status-labels'); },
   labelUrl(packetId: string) { return withKey(`/orders/api/label/${encodeURIComponent(packetId)}`); },
