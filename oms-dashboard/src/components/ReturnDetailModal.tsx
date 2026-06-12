@@ -31,7 +31,7 @@ function Field({ label, value, mono }: { label: string; value: any; mono?: boole
   );
 }
 
-export default function ReturnDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
+export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: string; onClose: () => void; onViewOrder?: (sellerOrderId: string) => void }) {
   const [ret, setRet] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -135,7 +135,18 @@ export default function ReturnDetailModal({ id, onClose }: { id: string; onClose
                 <Field label="Return ID" value={ret.id} mono />
                 <Field label="Type" value={isRTO(ret.type) ? 'RTO (Courier)' : 'Customer return'} />
                 <Field label="Created on" value={ret.createdOn ? formatDate(ret.createdOn) : null} />
-                <Field label="Seller order" value={ret.sellerOrderId} mono />
+                <div className="min-w-0">
+                  <div className="text-[9px] font-semibold text-zinc-400 uppercase tracking-wider">Seller order</div>
+                  {ret.sellerOrderId && onViewOrder ? (
+                    <button onClick={() => onViewOrder(ret.sellerOrderId)}
+                      className="text-[12px] font-mono font-medium text-indigo-600 hover:text-indigo-800 underline decoration-dotted break-all text-left"
+                      title="Open the parent order">
+                      {ret.sellerOrderId}
+                    </button>
+                  ) : (
+                    <div className="text-[12px] text-zinc-800 font-medium font-mono break-words">{ret.sellerOrderId || '—'}</div>
+                  )}
+                </div>
                 <Field label="Order line" value={ret.orderLineId} mono />
                 <Field label="Myntra order" value={ret.orderId} mono />
                 <Field label="Tracking" value={ret.trackingNumber} mono />
@@ -146,6 +157,27 @@ export default function ReturnDetailModal({ id, onClose }: { id: string; onClose
                 <div className="mt-3 rounded-lg bg-zinc-50 border border-black/[0.05] px-3 py-2">
                   <div className="text-[9px] font-semibold text-zinc-400 uppercase tracking-wider mb-0.5">Reason</div>
                   <div className="text-[12px] text-zinc-700">{ret.reason}</div>
+                </div>
+              )}
+              {Array.isArray(ret.items) && ret.items.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-[10px] font-semibold text-zinc-500 mb-1 flex items-center gap-1"><Hash size={11} /> Returned items</div>
+                  <div className="rounded-lg border border-black/[0.06] overflow-hidden bg-white">
+                    <table className="w-full text-[11px]">
+                      <thead className="bg-zinc-50 text-[9px] uppercase text-zinc-500">
+                        <tr><th className="px-2 py-1.5 text-left">SKU</th><th className="px-2 py-1.5 text-right">Qty</th><th className="px-2 py-1.5 text-left">Reason</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100">
+                        {ret.items.map((it: any, i: number) => (
+                          <tr key={i}>
+                            <td className="px-2 py-1.5 font-mono">{it.sku || '—'}</td>
+                            <td className="px-2 py-1.5 text-right">{it.quantity ?? '—'}</td>
+                            <td className="px-2 py-1.5 text-zinc-500">{it.reason || ret.reason || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </Section>

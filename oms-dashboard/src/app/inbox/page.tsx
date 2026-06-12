@@ -107,7 +107,13 @@ export default function InboxPage() {
       </div>
 
       {selected && <OrderDetailModal sellerOrderId={selected} source="inbox" onClose={() => setSelected(null)} onMutated={load} />}
-      {selectedReturn && <ReturnDetailModal id={selectedReturn} onClose={() => setSelectedReturn(null)} />}
+      {selectedReturn && (
+        <ReturnDetailModal
+          id={selectedReturn}
+          onClose={() => setSelectedReturn(null)}
+          onViewOrder={(sid) => { setSelectedReturn(null); setSelected(sid); }}
+        />
+      )}
     </>
   );
 }
