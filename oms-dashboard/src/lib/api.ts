@@ -36,6 +36,13 @@ export const api = {
   inboxReturns(): Promise<{ ok: boolean; totalCount: number; returns: any[] }> {
     return getJson('/orders/api/inbox/returns');
   },
+  inboxReturnDetail(id: string): Promise<{ ok: boolean; return: any; error?: string }> {
+    return getJson(`/orders/api/inbox/return/${encodeURIComponent(id)}`);
+  },
+  // Live return detail from Myntra (Returns Recon by id).
+  returnDetails(id: string): Promise<{ ok: boolean; httpStatus: number; statusCode: number | null; message: string | null; detail: any; error?: string }> {
+    return getJson(`/orders/api/return-details/${encodeURIComponent(id)}`);
+  },
   statusLabels() { return getJson('/orders/api/status-labels'); },
   labelUrl(packetId: string, source: 'live' | 'inbox' = 'live') {
     const base = source === 'inbox' ? '/orders/api/inbox/label' : '/orders/api/label';

@@ -279,4 +279,28 @@ router.get('/orders/api/inbox/returns', dashboardGate, (_req, res) => {
   res.json({ ok: true, totalCount: returns.length, returns });
 });
 
+// Full detail for one pushed return (everything Myntra sent + our status history).
+router.get('/orders/api/inbox/return/:id', dashboardGate, (req, res) => {
+  const r = db.returns.get(req.params.id);
+  if (!r) return res.status(404).json({ ok: false, error: 'Return not found' });
+  res.json({ ok: true, return: r });
+});
+
+// Live return detail from Myntra (Returns Recon by id). Surfaces Myntra's real status.
+router.get('/orders/api/return-details/:id', dashboardGate, async (req, res) => {
+  try {
+    const { status, body } = await myntraClient.fetchReturnDetails(req.params.id);
+    const data = Array.isArray(body.data) ? body.data : [];
+    return res.status(200).json({
+      ok: status === 200 && body.statusType !== 'ERROR',
+      httpStatus: status,
+      statusCode: body.statusCode ?? null,
+      message: body.statusMessage || body.message || null,
+      detail: data[0] || null,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 module.exports = router;

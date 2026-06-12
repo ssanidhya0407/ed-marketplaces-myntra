@@ -5,6 +5,7 @@ import { RotateCw, Inbox as InboxIcon, Undo2 } from 'lucide-react';
 import { api, type OrderSummary } from '@/lib/api';
 import OrdersTable from '@/components/OrdersTable';
 import OrderDetailModal from '@/components/OrderDetailModal';
+import ReturnDetailModal from '@/components/ReturnDetailModal';
 import { useRowDetails } from '@/lib/useRowDetails';
 import { formatDate } from '@/lib/utils';
 
@@ -19,6 +20,7 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedReturn, setSelectedReturn] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const details = useRowDetails(orders, 'inbox'); // enrich rows from the inbox (local store)
 
@@ -86,7 +88,7 @@ export default function InboxPage() {
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {returns.map((r) => (
-                <tr key={r.id} className="hover:bg-zinc-50/60">
+                <tr key={r.id} onClick={() => setSelectedReturn(r.id)} className="hover:bg-rose-50/40 cursor-pointer transition-colors">
                   <td className="px-4 py-3 font-mono text-[11px] text-zinc-700">{r.id}</td>
                   <td className="px-4 py-3">
                     <span className={'text-[10px] font-semibold px-2 py-0.5 rounded-md border ' + (r.type === 'COURIER_RETURN' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200')}>
@@ -105,6 +107,7 @@ export default function InboxPage() {
       </div>
 
       {selected && <OrderDetailModal sellerOrderId={selected} source="inbox" onClose={() => setSelected(null)} onMutated={load} />}
+      {selectedReturn && <ReturnDetailModal id={selectedReturn} onClose={() => setSelectedReturn(null)} />}
     </>
   );
 }

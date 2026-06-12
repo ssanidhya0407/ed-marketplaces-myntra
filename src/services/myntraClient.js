@@ -171,6 +171,18 @@ function fetchInvoiceDetails(packetId) {
   return myntraGet(`/partner/v4/packet/${encodeURIComponent(packetId)}/getInvoiceDetails/`);
 }
 
+// Returns Recon: POST /partner/v4/returns/returnRecon. Same endpoint serves both a
+// date-range search and a single-return detail (just send { id }).
+function searchReturns({ startDate, endDate, destinationWarehouseIds, page = 0, returnType } = {}) {
+  return myntraSend('POST', '/partner/v4/returns/returnRecon', {
+    startDate, endDate, destinationWarehouseIds, page, returnType,
+  });
+}
+
+function fetchReturnDetails(id) {
+  return myntraSend('POST', '/partner/v4/returns/returnRecon', { id });
+}
+
 // ---- Documents (raw PDF) ----
 function fetchShippingLabel(packetId) {
   return myntraRaw(`/partner/v4/packet/${encodeURIComponent(packetId)}/shippingLabel/`);
@@ -220,6 +232,8 @@ module.exports = {
   fetchOrderById,
   fetchPacketById,
   fetchInvoiceDetails,
+  searchReturns,
+  fetchReturnDetails,
   fetchShippingLabel,
   fetchInvoice,
   updateOrderEvent,
