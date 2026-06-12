@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   X, Package, MapPin, CreditCard, Calendar, Box, FileText, Download, Loader2, AlertTriangle, Truck,
-  Clock, ShieldCheck, RotateCcw,
+  Clock, ShieldCheck, RotateCcw, Receipt,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -29,6 +29,8 @@ export default function OrderDetailModal({
   // Cancel form (in-modal reason input instead of a browser prompt).
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('Out of stock');
+  // Invoice details (JSON) for a packet — live Myntra read, lazy-loaded on demand.
+  const [invDetails, setInvDetails] = useState<{ packetId: string; loading: boolean; ok: boolean; message: string; data: any } | null>(null);
 
   async function fetchDetail() {
     setLoading(true);
@@ -129,6 +131,24 @@ export default function OrderDetailModal({
       pushToast({ tone: 'err', title: 'Network error', message: e.message });
     } finally {
       setRtdSubmitting(false);
+    }
+  }
+
+  async function loadInvoiceDetails(packetId: string) {
+    // Toggle off if the same packet's details are already open.
+    if (invDetails && invDetails.packetId === packetId && !invDetails.loading) { setInvDetails(null); return; }
+    setInvDetails({ packetId, loading: true, ok: false, message: '', data: null });
+    try {
+      const res = await api.invoiceDetails(packetId);
+      setInvDetails({
+        packetId,
+        loading: false,
+        ok: res.ok,
+        message: res.message || res.error || (res.ok ? '' : `HTTP ${res.httpStatus}${res.statusCode ? ', code ' + res.statusCode : ''}`),
+        data: res.details,
+      });
+    } catch (e: any) {
+      setInvDetails({ packetId, loading: false, ok: false, message: e.message, data: null });
     }
   }
 
@@ -251,6 +271,13 @@ export default function OrderDetailModal({
                               <a href={api.invoiceUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
                                 <FileText size={11} /> Invoice
                               </a>
+                              {source === 'live' && (
+                                <button onClick={() => loadInvoiceDetails(l.packetId)}
+                                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-800">
+                                  {invDetails?.packetId === l.packetId && invDetails?.loading
+                                    ? <Loader2 size={11} className="animate-spin" /> : <Receipt size={11} />} Details
+                                </button>
+                              )}
                             </div>
                           ) : <span className="text-[11px] text-zinc-400">no packet</span>}
                         </td>
@@ -259,6 +286,24 @@ export default function OrderDetailModal({
                   </tbody>
                 </table>
               </div>
+
+              {invDetails && (
+                <div className="mt-3 rounded-xl border border-violet-200/60 bg-violet-50/40 p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-[12px] font-semibold text-violet-700 flex items-center gap-1.5">
+                      <Receipt size={13} /> Invoice details · packet <span className="font-mono">{invDetails.packetId}</span>
+                    </h4>
+                    <button onClick={() => setInvDetails(null)} className="text-zinc-400 hover:text-zinc-700"><X size={14} /></button>
+                  </div>
+                  {invDetails.loading ? (
+                    <div className="flex items-center gap-2 text-[12px] text-zinc-500"><Loader2 size={13} className="animate-spin" /> Fetching from Myntra…</div>
+                  ) : !invDetails.ok ? (
+                    <p className="text-[12px] text-amber-700">{invDetails.message || 'Could not load invoice details.'}</p>
+                  ) : (
+                    <pre className="text-[11px] font-mono text-zinc-700 bg-white border border-black/[0.06] rounded-lg p-2.5 overflow-auto max-h-72 whitespace-pre-wrap">{JSON.stringify(invDetails.data, null, 2)}</pre>
+                  )}
+                </div>
+              )}
             </Section>
 
             {/* Cancel form */}

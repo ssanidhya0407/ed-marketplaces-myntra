@@ -45,6 +45,10 @@ export const api = {
     const base = source === 'inbox' ? '/orders/api/inbox/invoice' : '/orders/api/invoice';
     return withKey(`${base}/${encodeURIComponent(packetId)}`);
   },
+  // Invoice details as JSON (live Myntra only). 2050 until the packet is RTD'd.
+  invoiceDetails(packetId: string): Promise<{ ok: boolean; httpStatus: number; statusCode: number | null; message: string | null; details: any; error?: string }> {
+    return getJson(`/orders/api/invoice-details/${encodeURIComponent(packetId)}`);
+  },
   async action(sellerOrderId: string, body: Record<string, unknown>): Promise<any> {
     const res = await fetch(withKey(`/orders/api/action/${encodeURIComponent(sellerOrderId)}`), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

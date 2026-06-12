@@ -149,6 +149,23 @@ router.get('/orders/api/invoice/:packetId', dashboardGate, async (req, res) => {
   }
 });
 
+// Invoice DETAILS (JSON, not the PDF). Myntra returns 2050 until the packet is RTD'd;
+// we surface Myntra's real status/code so the UI can show "not dispatched yet".
+router.get('/orders/api/invoice-details/:packetId', dashboardGate, async (req, res) => {
+  try {
+    const { status, body } = await myntraClient.fetchInvoiceDetails(req.params.packetId);
+    return res.status(200).json({
+      ok: status === 200 && body.statusType !== 'ERROR',
+      httpStatus: status,
+      statusCode: body.statusCode ?? null,
+      message: body.statusMessage || body.message || null,
+      details: body,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // Status change: accept | reject | cancel | ready_to_ship | ready_to_dispatch.
 // Mutates the live Myntra account — the UI confirms before calling this.
 router.post('/orders/api/action/:sellerOrderId', dashboardGate, async (req, res) => {

@@ -165,6 +165,12 @@ function fetchPacketById(packetId) {
   return myntraGet(`/partner/v4/packet/${encodeURIComponent(packetId)}`);
 }
 
+// Invoice details (JSON, not the PDF): GET /partner/v4/packet/:packetId/getInvoiceDetails/
+// Returns 2050 "Order is not marked RTD yet" until the packet has been dispatched.
+function fetchInvoiceDetails(packetId) {
+  return myntraGet(`/partner/v4/packet/${encodeURIComponent(packetId)}/getInvoiceDetails/`);
+}
+
 // ---- Documents (raw PDF) ----
 function fetchShippingLabel(packetId) {
   return myntraRaw(`/partner/v4/packet/${encodeURIComponent(packetId)}/shippingLabel/`);
@@ -213,6 +219,7 @@ module.exports = {
   fetchOrderList,
   fetchOrderById,
   fetchPacketById,
+  fetchInvoiceDetails,
   fetchShippingLabel,
   fetchInvoice,
   updateOrderEvent,
