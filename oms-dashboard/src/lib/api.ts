@@ -1,4 +1,4 @@
-// Client for the Express OMS backend (proxied via next.config rewrites).
+// Client for the Express OMS backend (proxied via next.config rewrites) — live Myntra only.
 export interface OrderLineSummary { orderLineId: number | string; sellerOrderId: string; status?: string | null }
 export interface OrderSummary { orderId: number | string; orderLines: OrderLineSummary[] }
 export interface ListResponse {
@@ -26,8 +26,9 @@ export const api = {
   orderDetail(sellerOrderId: string): Promise<{ ok: boolean; detail: any; error?: string }> {
     return getJson(`/orders/api/detail/${encodeURIComponent(sellerOrderId)}`);
   },
-  labelUrl: (packetId: string) => withKey(`/orders/api/label/${encodeURIComponent(packetId)}`),
-  invoiceUrl: (packetId: string) => withKey(`/orders/api/invoice/${encodeURIComponent(packetId)}`),
+  statusLabels() { return getJson('/orders/api/status-labels'); },
+  labelUrl(packetId: string) { return withKey(`/orders/api/label/${encodeURIComponent(packetId)}`); },
+  invoiceUrl(packetId: string) { return withKey(`/orders/api/invoice/${encodeURIComponent(packetId)}`); },
   async action(sellerOrderId: string, body: Record<string, unknown>): Promise<any> {
     const res = await fetch(withKey(`/orders/api/action/${encodeURIComponent(sellerOrderId)}`), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

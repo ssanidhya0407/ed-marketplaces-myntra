@@ -28,6 +28,11 @@ function updateOrder(req, res, next) {
 function downloadInvoice(req, res, next) {
   try {
     const result = orderService.downloadInvoice(req.validated);
+    if (result.pdf) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="invoice_${result.packetId}.pdf"`);
+      return res.send(result.pdf);
+    }
     return sendSuccess(req, res, result.code, {
       overrideMessage: result.overrideMessage,
       extraFields: result.extraFields,

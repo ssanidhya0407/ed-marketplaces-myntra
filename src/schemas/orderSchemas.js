@@ -1,11 +1,16 @@
 const { z } = require('zod');
 
+// Myntra's OUTBOUND "Create Order" push is a trusted, authenticated webhook. Its real
+// payload sends many fields as null (warehouse, quantity, acceptByTime, customerPromiseTime,
+// etc.) — see Myntra's own example. We must ACCEPT it, so every non-essential field is
+// nullish (accepts null OR missing). Only orderLineId is structurally required.
+const nstr = z.string().nullish();
 const orderLineEntrySchema = z
   .object({
     orderLineId: z.union([z.string().min(1), z.number()]),
-    sku: z.string().min(1),
-    quantity: z.number().int().positive(),
-    price: z.number().nonnegative().optional(),
+    sku: nstr,
+    quantity: z.number().int().nullish(),
+    price: z.number().nullish(),
   })
   .passthrough();
 
@@ -17,20 +22,22 @@ const createOrderSchema = z.object({
     .passthrough(),
   body: z
     .object({
-      sellerOrderId: z.string().min(1).optional(),
-      receiverName: z.string().min(1),
-      mobile: z.string().min(8),
-      address: z.string().min(5),
-      city: z.string().min(1),
-      state: z.string().min(1),
-      zipcode: z.string().min(3),
-      warehouse: z.string().min(1),
-      paymentMethod: z.enum(['on', 'cod']),
+      sellerOrderId: nstr,
+      receiverName: nstr,
+      mobile: nstr,
+      address: nstr,
+      city: nstr,
+      state: nstr,
+      zipcode: nstr,
+      warehouse: nstr,
+      paymentMethod: nstr,
       orderLineEntries: z.array(orderLineEntrySchema).min(1),
-      priority: z.boolean().optional(),
-      acceptByTime: z.string().optional(),
-      shipByTime: z.string().optional(),
-      customerPromiseTime: z.string().optional(),
+      priority: z.boolean().nullish(),
+      acceptByTime: nstr,
+      shipByTime: nstr,
+      customerPromiseTime: nstr,
+      status: nstr,
+      eventName: nstr,
     })
     .passthrough(),
   query: z.object({}).passthrough(),
@@ -48,44 +55,37 @@ const getOrderSchema = z.object({
   headers: z.object({}).passthrough(),
 });
 
+// Events our internal mock state-machine understands (used by the test/mock routes).
 const allowedEventTypes = [
-  'accept',
-  'reject',
-  'pack',
-  'readyToDispatch',
-  'shipped',
-  'delivered',
-  'lost',
-  'onhold',
-  'unhold',
-  'itemCancellation',
-  'cancelItems',
+  'accept', 'reject', 'pack', 'readyToDispatch', 'shipped', 'delivered',
+  'lost', 'onhold', 'unhold', 'itemCancellation', 'cancelItems',
 ];
 
+// Myntra's OUTBOUND Update Order push uses a broader, sometimes PascalCase set:
+// ItemCancellation, onhold, unhold, shipped, delivered, trackingNumberUpdate,
+// reassignReleaseUpdate, itemBlock, itemNsts, itemXPacked. The webhook must accept
+// ANY event type and a varying body (mostly nullable) — so we validate permissively.
 const updateOrderSchema = z.object({
   params: z
     .object({
       sellerOrderId: z.string().min(1),
-      eventType: z.enum(allowedEventTypes),
+      eventType: z.string().min(1),
     })
-    .strict(),
+    .passthrough(),
   body: z
     .object({
-      warehouse: z.string().min(1).optional(),
-      trackingNumber: z.union([z.string().min(1), z.number()]).optional(),
-      courier: z.string().min(1).optional(),
-      eventTime: z.string().optional(),
+      warehouse: z.string().nullish(),
+      trackingNumber: z.union([z.string(), z.number()]).nullish(),
+      courier: z.string().nullish(),
+      courierCode: z.string().nullish(),
+      eventTime: z.string().nullish(),
       orderLineEntries: z
         .array(
           z
-            .object({
-              orderLineId: z.union([z.string().min(1), z.number()]),
-              rejectionReasonId: z.number().int().positive().optional(),
-              comment: z.string().max(500).optional(),
-            })
+            .object({ orderLineId: z.union([z.string().min(1), z.number()]).optional() })
             .passthrough(),
         )
-        .optional(),
+        .nullish(),
     })
     .passthrough(),
   query: z.object({}).passthrough(),

@@ -55,6 +55,8 @@ app.use((req, res, next) => {
 });
 app.use((req, res, next) => {
   if (AUTH_BYPASS_PATHS.has(req.path)) return next();
+  // Myntra's Download Invoice push does not send x-partner-store (per its spec).
+  if (req.path.startsWith('/storefront/v4/packet/downloadinvoice')) return next();
   return partnerStoreHeaderMiddleware(req, res, next);
 });
 

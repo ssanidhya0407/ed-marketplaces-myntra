@@ -133,7 +133,9 @@ router.post('/orders/api/action/:sellerOrderId', dashboardGate, async (req, res)
         return res.status(400).json({ ok: false, error: `Unknown action: ${action}` });
     }
     const body = result.body || {};
-    return res.status(result.status === 200 ? 200 : 502).json({
+    // Always answer 200 to the dashboard with an explicit ok flag, and surface
+    // Myntra's REAL http status + code + message (don't mask a 403 as a 502).
+    return res.status(200).json({
       ok: result.status === 200 && body.statusType !== 'ERROR',
       httpStatus: result.status,
       statusCode: body.statusCode ?? null,

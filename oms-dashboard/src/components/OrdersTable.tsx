@@ -89,7 +89,7 @@ export default function OrdersTable({
                 <td className="px-4 py-3 text-right font-semibold text-zinc-900 tabular-nums">
                   {d === undefined ? <span className="text-zinc-300 font-normal">…</span> : (d.amount != null ? formatINR(d.amount) : '—')}
                 </td>
-                <td className="px-4 py-3"><StatusBadge code={line?.status} /></td>
+                <td className="px-4 py-3"><StatusBadge code={d?.status ?? line?.status} /></td>
                 <td className="px-4 py-3"><DocsCell d={d} /></td>
                 <td className="px-4 py-3 text-zinc-300 group-hover:text-indigo-400 transition-colors"><ChevronRight size={16} /></td>
               </tr>
