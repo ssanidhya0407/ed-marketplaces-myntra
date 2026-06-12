@@ -20,11 +20,12 @@ export default function OrderDetailModal({
   const [busy, setBusy] = useState<ActionKey | null>(null);
   const { pushToast } = useNotifications();
 
-  // Ready-to-Dispatch form (PPMP: RTD requires seller invoice + tax — collection schema).
+  // Ready-to-Dispatch (Myntra-generated invoice: minimal body, no seller invoice fields).
   const [rtdOpen, setRtdOpen] = useState(false);
-  const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(''); // datetime-local value
   const [rtdSubmitting, setRtdSubmitting] = useState(false);
+  // Myntra returns the tracking number in the RTD response; keep it so Ready to Ship
+  // unlocks immediately even before the order re-fetch reflects it.
+  const [rtdTracking, setRtdTracking] = useState('');
   // Cancel form (in-modal reason input instead of a browser prompt).
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('Out of stock');
@@ -50,7 +51,7 @@ export default function OrderDetailModal({
   // Myntra assigns the tracking number at RTD; it arrives at the order top level
   // (e.g. "trackingNumber": "MYEC1105151644"), with a line-level fallback.
   const trackingNo: string =
-    detail?.trackingNumber || lines.find((l) => l.trackingNumber)?.trackingNumber || '';
+    detail?.trackingNumber || lines.find((l) => l.trackingNumber)?.trackingNumber || rtdTracking || '';
   const addr = detail && [detail.address, detail.locality, detail.city, detail.stateName || detail.state, detail.zipcode, detail.country].filter(Boolean).join(', ');
 
   async function runAction(action: ActionKey) {
@@ -72,7 +73,7 @@ export default function OrderDetailModal({
       body.trackingNo = trackingNo;
     }
     if (action === 'ready_to_dispatch') {
-      // RTD needs invoice + tax — handled by the dedicated form (openRtd/submitRtd).
+      // RTD is confirmed via a short review panel (openRtd/submitRtd).
       openRtd();
       return;
     }
@@ -98,49 +99,26 @@ export default function OrderDetailModal({
   }
 
   function openRtd() {
-    // default invoice date = now, as a datetime-local value
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    setInvoiceDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
-    setInvoiceNumber('');
     setRtdOpen(true);
   }
 
-  // datetime-local "yyyy-MM-ddTHH:mm" -> Myntra "dd-MM-yyyy HH:mm:ss"
-  function toMyntraDate(v: string): string {
-    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v);
-    if (!m) return v;
-    return `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}:00`;
-  }
-
   async function submitRtd() {
-    if (!invoiceNumber.trim()) { pushToast({ tone: 'err', title: 'Invoice number required', message: 'Enter your seller invoice number.' }); return; }
-    if (!invoiceDate) { pushToast({ tone: 'err', title: 'Invoice date required', message: 'Pick the invoice date.' }); return; }
     const warehouse = lines[0]?.warehouse || detail.warehouse;
-    const orderLineEntries = lines.map((l) => ({
-      sellerOrderId,
-      orderLineId: l.orderLineId,
-      invoiceNumber: invoiceNumber.trim(),
-      invoiceDate: toMyntraDate(invoiceDate),
-      unitTotalAmount: l.lineFinalAmount ?? l.mrp ?? undefined,
-      // carry the tax breakup Myntra already attached to the order line
-      taxEntries: Array.isArray(l.taxEntries)
-        ? l.taxEntries.map((t: any) => ({
-            taxType: t.taxType,
-            taxRate: t.taxRate,
-            unitTaxAmount: t.unitTaxAmount,
-            unitTaxableAmount: t.unitTaxableAmount,
-          }))
-        : undefined,
-    }));
+    // Myntra-generated invoice model: the RTD body only needs the order line refs —
+    // Myntra produces the invoice and assigns packet/courier/tracking on its side.
+    const orderLineEntries = lines.map((l) => ({ sellerOrderId, orderLineId: l.orderLineId }));
 
-    if (!window.confirm(`Mark order ${sellerOrderId} READY TO DISPATCH on the LIVE Myntra account?\n\nThis packs the order, files invoice ${invoiceNumber.trim()}, and generates the packet/label. It cannot be cancelled afterwards.`)) return;
+    if (!window.confirm(`Mark order ${sellerOrderId} READY TO DISPATCH on the LIVE Myntra account?\n\nThis packs the order and generates the packet, shipping label, and Myntra invoice. It cannot be cancelled afterwards.`)) return;
 
     setRtdSubmitting(true);
     try {
       const res = await api.action(sellerOrderId, { action: 'ready_to_dispatch', warehouse, orderLineEntries });
       if (res.ok) {
-        pushToast({ tone: 'ok', title: 'Ready to Dispatch done', message: `${res.message || 'Order packed'} (code ${res.statusCode ?? res.httpStatus})` });
+        // RTD returns packetId + courierCode + trackingNumber — keep the tracking
+        // number so Ready to Ship unlocks immediately, before the re-fetch lands.
+        const tn = res.raw?.trackingNumber || '';
+        if (tn) setRtdTracking(tn);
+        pushToast({ tone: 'ok', title: 'Ready to Dispatch done', message: `${res.message || 'Order packed'}${tn ? ` · tracking ${tn}` : ''} (code ${res.statusCode ?? res.httpStatus})` });
         setRtdOpen(false);
         await fetchDetail();
         onMutated?.();
@@ -306,20 +284,8 @@ export default function OrderDetailModal({
             {rtdOpen && (
               <div className="bg-indigo-50/40 border border-indigo-200/60 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-[12px] font-semibold text-indigo-700 flex items-center gap-1.5"><Truck size={13} /> Ready to Dispatch — pack &amp; file invoice</h4>
+                  <h4 className="text-[12px] font-semibold text-indigo-700 flex items-center gap-1.5"><Truck size={13} /> Ready to Dispatch — pack &amp; generate label</h4>
                   <button onClick={() => setRtdOpen(false)} className="text-zinc-400 hover:text-zinc-700"><X size={14} /></button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Seller invoice number *</label>
-                    <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-2026-00123"
-                      className="mt-1 w-full px-3 py-2 text-[12px] bg-white border border-black/[0.08] rounded-lg focus:border-indigo-400 outline-none font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Invoice date *</label>
-                    <input type="datetime-local" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)}
-                      className="mt-1 w-full px-3 py-2 text-[12px] bg-white border border-black/[0.08] rounded-lg focus:border-indigo-400 outline-none" />
-                  </div>
                 </div>
                 <div className="rounded-lg border border-black/[0.06] overflow-hidden bg-white">
                   <table className="w-full text-[11px]">
@@ -341,7 +307,7 @@ export default function OrderDetailModal({
                     </tbody>
                   </table>
                 </div>
-                <p className="text-[10px] text-zinc-500">Amount &amp; tax are taken from the order as Myntra supplied it. RTD is irreversible — the order cannot be cancelled after this.</p>
+                <p className="text-[10px] text-zinc-500">Myntra generates the invoice for this account — no invoice number needed. Amount &amp; tax shown are as Myntra supplied them. RTD is irreversible — the order cannot be cancelled after this.</p>
                 <div className="flex items-center justify-end gap-2">
                   <button onClick={() => setRtdOpen(false)} disabled={rtdSubmitting} className="px-3 py-1.5 text-[11px] font-medium text-zinc-600 hover:text-zinc-900 disabled:opacity-50">Cancel</button>
                   <button onClick={submitRtd} disabled={rtdSubmitting}
