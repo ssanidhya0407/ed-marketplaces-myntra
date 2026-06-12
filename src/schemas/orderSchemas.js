@@ -55,44 +55,37 @@ const getOrderSchema = z.object({
   headers: z.object({}).passthrough(),
 });
 
+// Events our internal mock state-machine understands (used by the test/mock routes).
 const allowedEventTypes = [
-  'accept',
-  'reject',
-  'pack',
-  'readyToDispatch',
-  'shipped',
-  'delivered',
-  'lost',
-  'onhold',
-  'unhold',
-  'itemCancellation',
-  'cancelItems',
+  'accept', 'reject', 'pack', 'readyToDispatch', 'shipped', 'delivered',
+  'lost', 'onhold', 'unhold', 'itemCancellation', 'cancelItems',
 ];
 
+// Myntra's OUTBOUND Update Order push uses a broader, sometimes PascalCase set:
+// ItemCancellation, onhold, unhold, shipped, delivered, trackingNumberUpdate,
+// reassignReleaseUpdate, itemBlock, itemNsts, itemXPacked. The webhook must accept
+// ANY event type and a varying body (mostly nullable) — so we validate permissively.
 const updateOrderSchema = z.object({
   params: z
     .object({
       sellerOrderId: z.string().min(1),
-      eventType: z.enum(allowedEventTypes),
+      eventType: z.string().min(1),
     })
-    .strict(),
+    .passthrough(),
   body: z
     .object({
-      warehouse: z.string().min(1).optional(),
-      trackingNumber: z.union([z.string().min(1), z.number()]).optional(),
-      courier: z.string().min(1).optional(),
-      eventTime: z.string().optional(),
+      warehouse: z.string().nullish(),
+      trackingNumber: z.union([z.string(), z.number()]).nullish(),
+      courier: z.string().nullish(),
+      courierCode: z.string().nullish(),
+      eventTime: z.string().nullish(),
       orderLineEntries: z
         .array(
           z
-            .object({
-              orderLineId: z.union([z.string().min(1), z.number()]),
-              rejectionReasonId: z.number().int().positive().optional(),
-              comment: z.string().max(500).optional(),
-            })
+            .object({ orderLineId: z.union([z.string().min(1), z.number()]).optional() })
             .passthrough(),
         )
-        .optional(),
+        .nullish(),
     })
     .passthrough(),
   query: z.object({}).passthrough(),

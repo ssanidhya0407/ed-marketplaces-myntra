@@ -1,6 +1,7 @@
 const AppError = require('../errors/AppError');
 const db = require('../db/mockDb');
 const { hashPayload } = require('../utils/hash');
+const { buildPdf } = require('../utils/miniPdf');
 
 // Internal status -> Myntra order search statusCode (per myntradeveloper.md)
 const MYNTRA_STATUS_CODE_MAP = {
@@ -99,129 +100,74 @@ function createOrder({ params, body }) {
   return success(db.orders.get(sellerOrderId));
 }
 
+// Inbound webhook: Myntra pushes order/packet updates. Event types (some PascalCase):
+// ItemCancellation, onhold, unhold, shipped, delivered, trackingNumberUpdate,
+// reassignReleaseUpdate, itemBlock, itemNsts, itemXPacked. The webhook must accept any
+// event and ALWAYS acknowledge success — it never rejects Myntra's push.
 function updateOrder({ params, body }) {
-  const { sellerOrderId, eventType } = params;
+  const { sellerOrderId } = params;
+  const ev = String(params.eventType || '').toLowerCase();
   const order = db.orders.get(sellerOrderId);
-  if (!order) throw new AppError(2008);
 
-  if (body.warehouse && body.warehouse !== order.warehouse) {
-    throw new AppError(2063);
+  // Acknowledge even if we don't have the order yet (Myntra still expects success).
+  if (!order) {
+    return { code: 1000, overrideMessage: 'Order updated successfully', extraFields: { sellerOrderId, eventType: params.eventType, applied: false } };
   }
 
-  if (body.orderLineEntries && body.orderLineEntries.length) {
-    for (const line of body.orderLineEntries) {
-      if (!order.lineMap.has(String(line.orderLineId))) {
-        throw new AppError(2031);
-      }
+  const setStatus = (s) => { if (order.status !== s) { order.status = s; order.statusHistory.push(s); } };
+  const ok = (code = 1000) => { db.markDirty(); return { code, overrideMessage: 'Order updated successfully', extraFields: serializeOrder(order) }; };
+
+  switch (ev) {
+    case 'accept': setStatus('ACCEPTED'); return ok(1000);
+    case 'reject': setStatus('REJECTED'); return ok(1000);
+    case 'pack':
+    case 'readytodispatch': setStatus('READY_TO_DISPATCH'); return ok(1000);
+    case 'shipped':
+      if (body.trackingNumber) order.trackingNumber = String(body.trackingNumber);
+      if (body.courier || body.courierCode) order.courier = String(body.courier || body.courierCode);
+      setStatus('SHIPPED'); return ok(1009);
+    case 'delivered': setStatus('DELIVERED'); return ok(1000);
+    case 'onhold': setStatus('ON_HOLD'); return ok(1000);
+    case 'unhold': setStatus('ACCEPTED'); return ok(1000);
+    case 'trackingnumberupdate':
+      if (body.trackingNumber) order.trackingNumber = String(body.trackingNumber);
+      if (body.courier || body.courierCode) order.courier = String(body.courier || body.courierCode);
+      return ok(1000);
+    case 'reassignreleaseupdate':
+      if (body.warehouse) order.warehouse = String(body.warehouse);
+      return ok(1000);
+    case 'itemcancellation':
+    case 'cancelitems': {
+      const entries = Array.isArray(body.orderLineEntries) ? body.orderLineEntries : [];
+      for (const e of entries) { const line = order.lineMap.get(String(e.orderLineId)); if (line) line.cancelled = true; }
+      if (order.lineMap.size && Array.from(order.lineMap.values()).every((l) => l.cancelled)) setStatus('CANCELLED');
+      return ok(1004);
     }
+    case 'lost': setStatus('LOST'); return ok(1000);
+    // itemBlock / itemNsts / itemXPacked / anything else → acknowledge without failing.
+    default: return ok(1000);
   }
-
-  if (eventType === 'accept') {
-    if (order.status === 'CANCELLED') throw new AppError(2061);
-    if (order.status !== 'CREATED') throw new AppError(2033);
-    order.status = 'ACCEPTED';
-    order.statusHistory.push('ACCEPTED');
-    db.markDirty();
-    return { code: 1000, extraFields: serializeOrder(order) };
-  }
-
-  if (eventType === 'reject') {
-    order.status = 'REJECTED';
-    order.statusHistory.push('REJECTED');
-    db.markDirty();
-    return { code: 1000, extraFields: serializeOrder(order) };
-  }
-
-  if (eventType === 'pack' || eventType === 'readyToDispatch') {
-    if (!['ACCEPTED', 'READY_TO_DISPATCH'].includes(order.status)) throw new AppError(8247);
-    order.status = 'READY_TO_DISPATCH';
-    order.statusHistory.push('READY_TO_DISPATCH');
-    db.markDirty();
-    return { code: 1000, extraFields: serializeOrder(order) };
-  }
-
-  if (eventType === 'shipped') {
-    if (!body.trackingNumber || !body.courier || !body.warehouse) {
-      throw new AppError(2006, 'trackingNumber, courier and warehouse are required for shipped event');
-    }
-    if (!['READY_TO_DISPATCH', 'SHIPPED'].includes(order.status)) throw new AppError(8247);
-    order.status = 'SHIPPED';
-    order.statusHistory.push('SHIPPED');
-    order.trackingNumber = String(body.trackingNumber);
-    order.courier = String(body.courier);
-    db.markDirty();
-    return { code: 1009, extraFields: serializeOrder(order) };
-  }
-
-  if (eventType === 'delivered') {
-    if (!['SHIPPED', 'DELIVERED'].includes(order.status)) throw new AppError(8247);
-    order.status = 'DELIVERED';
-    order.statusHistory.push('DELIVERED');
-    db.markDirty();
-    return { code: 1000, extraFields: serializeOrder(order) };
-  }
-
-  if (eventType === 'onhold') {
-    if (order.status === 'ON_HOLD') throw new AppError(2062);
-    order.status = 'ON_HOLD';
-    order.statusHistory.push('ON_HOLD');
-    db.markDirty();
-    return { code: 1000, extraFields: serializeOrder(order) };
-  }
-
-  if (eventType === 'unhold') {
-    if (order.status !== 'ON_HOLD') throw new AppError(2062);
-    order.status = 'ACCEPTED';
-    order.statusHistory.push('ACCEPTED');
-    db.markDirty();
-    return { code: 1000, extraFields: serializeOrder(order) };
-  }
-
-  if (eventType === 'itemCancellation' || eventType === 'cancelItems') {
-    if (!body.orderLineEntries?.length) throw new AppError(2006, 'orderLineEntries required for cancellation');
-    for (const entry of body.orderLineEntries) {
-      const line = order.lineMap.get(String(entry.orderLineId));
-      if (line.cancelled) throw new AppError(2061);
-      line.cancelled = true;
-    }
-    const allCancelled = Array.from(order.lineMap.values()).every((line) => line.cancelled);
-    if (allCancelled) {
-      order.status = 'CANCELLED';
-      order.statusHistory.push('CANCELLED');
-    }
-    db.markDirty();
-    return { code: 1004, extraFields: serializeOrder(order) };
-  }
-
-  if (eventType === 'lost') {
-    order.status = 'LOST';
-    order.statusHistory.push('LOST');
-    db.markDirty();
-    return { code: 1000, extraFields: serializeOrder(order) };
-  }
-
-  throw new AppError(2006, 'Unsupported eventType');
 }
 
+// Myntra fetches the seller-generated invoice here and expects a PDF byte stream.
 function downloadInvoice({ params }) {
   const packet = db.packets.get(params.packetId);
   if (!packet) throw new AppError(2020);
   const order = db.orders.get(packet.sellerOrderId);
-  return {
-    code: 1005,
-    extraFields: {
-      packetId: params.packetId,
-      sellerOrderId: packet.sellerOrderId,
-      fileUrl: packet.fileUrl,
-      orderLines: order
-        ? Array.from(order.lineMap.values()).map((line) => ({
-            orderLineId: String(line.orderLineId),
-            sku: String(line.sku),
-            quantity: Number(line.quantity),
-          }))
-        : [],
-    },
-  };
+  const r = (order && order.receiver) || {};
+  const line = order ? Array.from(order.lineMap.values())[0] : {};
+  const pdf = buildPdf('Tax Invoice', [
+    `Packet: ${params.packetId}`,
+    `Order: ${packet.sellerOrderId}`,
+    `Invoice No: ${(line && line.invoiceNumber) || '-'}    Date: ${(line && line.invoiceDate) || '-'}`,
+    '',
+    `Customer: ${r.receiverName || '-'}`,
+    `Item: ${(line && line.sku) || '-'}    Qty: ${(line && (line.quantity ?? 1)) || '-'}`,
+    `Amount: INR ${(line && line.lineFinalAmount) ?? '-'}`,
+    '',
+    'Seller: EXPERIENCES.DIGITAL PRIVATE LIMITED',
+  ]);
+  return { pdf, packetId: params.packetId };
 }
 
 function parseDateBoundary(value, endOfDay) {
