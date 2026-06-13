@@ -254,6 +254,61 @@ router.post('/orders/api/inventory/update', dashboardGate, async (req, res) => {
   }
 });
 
+// Current inventory for given SKUs (Search Inventory), chunked to 10/call.
+// Returns sku -> [{ store_code, count }] plus any SKUs Myntra couldn't find.
+router.post('/orders/api/inventory/search', dashboardGate, async (req, res) => {
+  try {
+    const skus = (Array.isArray(req.body?.skus) ? req.body.skus : []).map((s) => String(s).trim()).filter(Boolean);
+    if (!skus.length) return res.status(400).json({ ok: false, error: 'No SKUs provided.' });
+    const inventory = {};
+    const failed = [];
+    const blocked = [];
+    for (let k = 0; k < skus.length; k += 10) {
+      const chunk = skus.slice(k, k + 10);
+      const r = await myntraClient.searchInventory(chunk);
+      const body = r.body || {};
+      if (r.status !== 200 || body.statusType === 'ERROR') {
+        // e.g. Myntra's WAF 403s certain exact SKU strings — surface, don't drop silently.
+        blocked.push(...chunk);
+        continue;
+      }
+      for (const d of body.inventoryDetails || []) {
+        inventory[d.sku] = (d.stores || []).map((s) => ({ store_code: s.stores_code ?? s.store_code ?? null, count: s.inventoryCount }));
+      }
+      for (const f of body.failedEntries || []) failed.push(f);
+    }
+    return res.json({ ok: true, inventory, failed, blocked });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Distinct seller SKUs seen across this account's orders (best-effort discovery,
+// since there's no catalog API). Bounded so it can't run away.
+router.get('/orders/api/skus', dashboardGate, async (_req, res) => {
+  try {
+    const first = await myntraClient.fetchOrderList({ page: 0 });
+    const fb = first.body || {};
+    let orders = Array.isArray(fb.data) ? fb.data : [];
+    const pages = Math.min(fb.pages || 1, 6);
+    for (let p = 1; p < pages; p++) {
+      const r = await myntraClient.fetchOrderList({ page: p });
+      if (r.body && Array.isArray(r.body.data)) orders = orders.concat(r.body.data);
+    }
+    const sids = [...new Set(orders.flatMap((o) => (o.orderLines || []).map((l) => l.sellerOrderId)).filter(Boolean))].slice(0, 80);
+    const skus = new Set();
+    for (const sid of sids) {
+      try {
+        const d = await myntraClient.fetchOrderById(sid);
+        for (const l of d.body?.orderLineEntries || []) if (l.sku) skus.add(String(l.sku));
+      } catch (_e) { /* skip */ }
+    }
+    return res.json({ ok: true, skus: [...skus].sort() });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // ───────── Inbox: orders & returns Myntra PUSHED to our webhook (local store) ─────────
 // Real-time work queue, independent of getOrderList. Status-change actions still hit the
 // live Myntra API (these are real Myntra orders) via /orders/api/action.

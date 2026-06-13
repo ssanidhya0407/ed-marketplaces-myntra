@@ -234,6 +234,13 @@ function updateInventory(items = []) {
   return myntraSend('PUT', '/partner/v4/inventory/update', items);
 }
 
+// Search Inventory: POST /partner/v4/inventory/search — body is a raw array of SKU strings.
+// Returns { inventoryDetails:[{sku, stores:[{stores_code, inventoryCount}]}], failedEntries:[] }.
+function searchInventory(skus = []) {
+  if (!skus.length) throw new AppError(2006, 'At least one SKU is required');
+  return myntraSend('POST', '/partner/v4/inventory/search', skus);
+}
+
 module.exports = {
   generateToken,
   fetchOrderList,
@@ -249,4 +256,5 @@ module.exports = {
   markReadyToShip,
   markReadyToDispatch,
   updateInventory,
+  searchInventory,
 };

@@ -70,4 +70,14 @@ export const api = {
     const data = await res.json().catch(() => ({}));
     return { httpStatus: res.status, ...data };
   },
+  async searchInventory(skus: string[]): Promise<{ ok: boolean; inventory?: Record<string, Array<{ store_code: string; count: number }>>; failed?: string[]; blocked?: string[]; error?: string; httpStatus: number }> {
+    const res = await fetch(withKey('/orders/api/inventory/search'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { httpStatus: res.status, ...data };
+  },
+  listSkus(): Promise<{ ok: boolean; skus?: string[]; error?: string }> {
+    return getJson('/orders/api/skus');
+  },
 };
