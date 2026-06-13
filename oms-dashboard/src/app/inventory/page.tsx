@@ -24,8 +24,6 @@ const FIELD_ALIASES: Record<keyof Row, string[]> = {
 
 export default function InventoryPage() {
   const [rows, setRows] = useState<Row[]>([blankRow()]);
-  const [bulk, setBulk] = useState('');
-  const [showBulk, setShowBulk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -35,15 +33,6 @@ export default function InventoryPage() {
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, [key]: val } : row)));
   const addRow = () => setRows((r) => [...r, blankRow()]);
   const removeRow = (i: number) => setRows((r) => (r.length === 1 ? [blankRow()] : r.filter((_, idx) => idx !== i)));
-
-  function applyBulk() {
-    const parsed: Row[] = bulk.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((line) => {
-      const [sku, quantity, sla, store] = line.split(/[,\t]/).map((s) => s.trim());
-      return { sku: sku || '', quantity: quantity || '', processingSla: sla || DEFAULT_SLA, store_code: store || DEFAULT_STORE };
-    }).filter((r) => r.sku);
-    if (!parsed.length) { pushToast({ tone: 'err', title: 'Nothing to parse', message: 'Use one "sku,quantity" per line.' }); return; }
-    setRows(parsed); setShowBulk(false); setBulk('');
-  }
 
   async function onExcel(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -133,24 +122,9 @@ export default function InventoryPage() {
             <FileSpreadsheet size={13} /> Upload Excel
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={onExcel} className="hidden" />
           </label>
-          <button onClick={() => setShowBulk((s) => !s)} className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors">
-            <Upload size={13} /> Paste
-          </button>
         </div>
       </div>
-      <p className="text-xs text-zinc-500 mb-4">Push the latest stock snapshot to Myntra (Seller API). Enter rows, paste, or upload an Excel sheet — columns: <code className="font-mono text-zinc-600">SKU, Quantity, Processing SLA, Store Code</code>. Sent in batches of 10 automatically.</p>
-
-      {showBulk && (
-        <div className="rounded-2xl bg-white border border-black/[0.06] p-4 mb-4 shadow-sm">
-          <div className="text-[11px] font-semibold text-zinc-500 mb-1.5">One per line: <code className="font-mono text-zinc-600">sku,quantity,sla,storecode</code> (sla &amp; store optional)</div>
-          <textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} placeholder={`8903880486532,25\n8903880486549,10,5,84502`}
-            className="w-full px-3 py-2 text-[12px] font-mono bg-zinc-50 border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
-          <div className="flex justify-end gap-2 mt-2">
-            <button onClick={() => { setShowBulk(false); setBulk(''); }} className="px-3 py-1.5 text-[11px] font-medium text-zinc-600 hover:text-zinc-900">Cancel</button>
-            <button onClick={applyBulk} className="px-3.5 py-1.5 text-[11px] font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Load rows</button>
-          </div>
-        </div>
-      )}
+      <p className="text-xs text-zinc-500 mb-4">Push the latest stock snapshot to Myntra (Seller API). Enter rows manually or upload an Excel sheet — columns: <code className="font-mono text-zinc-600">SKU, Quantity, Processing SLA, Store Code</code>. Sent in batches of 10 automatically.</p>
 
       <div className="rounded-2xl bg-white border border-black/[0.06] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
         <table className="w-full text-sm">
