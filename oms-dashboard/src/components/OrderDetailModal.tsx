@@ -458,7 +458,9 @@ function Field({ icon: Icon, label, value }: { icon: LucideIcon; label: string; 
 }
 
 function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
-  const cancelled = String(l.status_code || '').toUpperCase() === 'IC';
+  // Truly cancelled only if the line is IC or Myntra stamped cancelledOn. A bare
+  // cancellationReason with no cancelledOn is a *request* that was never actioned.
+  const cancelled = String(l.status_code || '').toUpperCase() === 'IC' || !!l.cancelledOn;
   const discounted = l.mrp && l.lineFinalAmount && Number(l.mrp) !== Number(l.lineFinalAmount);
   return (
     <div className={cx(
