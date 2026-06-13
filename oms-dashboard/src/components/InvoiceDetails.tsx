@@ -20,15 +20,18 @@ function InvoiceDoc({ lines, customer, address }: { lines: any[]; customer?: str
   const taxByType: Record<string, number> = {};
   let sumTaxable = 0;
   let sumTax = 0;
+  let sumCustomerPaid = 0;
   const rows = lines.map((l) => {
     const taxes: any[] = Array.isArray(l.taxEntries) ? l.taxEntries : [];
     const taxable = num(taxes[0]?.unitTaxableAmount ?? l.unitSalePriceWithoutTax);
     const lineTax = taxes.reduce((s, t) => s + num(t.unitTaxAmount), 0);
     taxes.forEach((t) => { const k = String(t.taxType || 'TAX').toUpperCase(); taxByType[k] = (taxByType[k] || 0) + num(t.unitTaxAmount); });
     sumTaxable += taxable; sumTax += lineTax;
+    sumCustomerPaid += num(l.finalAmount);
     return { sku: l.sku, mrp: l.mrp, finalAmount: l.finalAmount, taxable, taxes, amount: taxable + lineTax };
   });
-  const grand = sumTaxable + sumTax;
+  const grand = sumTaxable + sumTax;           // seller settlement (= sellerFinalAmount)
+  const deductions = sumCustomerPaid - grand;   // Myntra's marketplace charge
 
   return (
     <div className="rounded-xl border border-black/[0.1] bg-white overflow-hidden">
@@ -90,12 +93,18 @@ function InvoiceDoc({ lines, customer, address }: { lines: any[]; customer?: str
 
       {/* Totals */}
       <div className="border-t border-black/[0.08] px-4 py-3 flex justify-end">
-        <div className="w-full sm:w-64 text-[11px] space-y-1.5">
+        <div className="w-full sm:w-72 text-[11px] space-y-1.5">
           <div className="flex justify-between"><span className="text-zinc-500">Taxable value</span><span className="tabular-nums text-zinc-700">{formatINR(sumTaxable)}</span></div>
           {Object.entries(taxByType).map(([k, v]) => (
             <div key={k} className="flex justify-between"><span className="text-zinc-500">{k}</span><span className="tabular-nums text-zinc-700">{formatINR(v)}</span></div>
           ))}
-          <div className="flex justify-between border-t border-black/[0.12] pt-2 mt-1 text-[14px] font-bold text-zinc-900"><span>Invoice total</span><span className="tabular-nums">{formatINR(grand)}</span></div>
+          <div className="flex justify-between border-t border-black/[0.12] pt-2 mt-1 text-[14px] font-bold text-zinc-900"><span>Seller settlement</span><span className="tabular-nums">{formatINR(grand)}</span></div>
+          {sumCustomerPaid > 0 && (
+            <div className="mt-2 pt-2 border-t border-dashed border-black/[0.12] space-y-1 text-zinc-400">
+              <div className="flex justify-between"><span>Customer paid</span><span className="tabular-nums">{formatINR(sumCustomerPaid)}</span></div>
+              {deductions > 0.5 && <div className="flex justify-between"><span>Myntra marketplace charges</span><span className="tabular-nums">− {formatINR(deductions)}</span></div>}
+            </div>
+          )}
         </div>
       </div>
     </div>
