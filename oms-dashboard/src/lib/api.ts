@@ -63,4 +63,11 @@ export const api = {
     const data = await res.json().catch(() => ({}));
     return { httpStatus: res.status, ...data };
   },
+  async updateInventory(items: Array<{ sku: string; quantity: number | string; processingSla?: number | string; store_code: string }>): Promise<{ ok: boolean; submitted?: number; succeeded?: number; failed?: any[]; chunkErrors?: any[]; error?: string; httpStatus: number }> {
+    const res = await fetch(withKey('/orders/api/inventory/update'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { httpStatus: res.status, ...data };
+  },
 };

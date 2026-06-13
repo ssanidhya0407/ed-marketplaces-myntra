@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2 } from 'lucide-react';
+import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes } from 'lucide-react';
 import { useNotifications } from './NotificationProvider';
 import { cx } from '@/lib/utils';
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: '/orders/new', label: 'New Orders', icon: Sparkles },
   { href: '/inbox', label: 'Inbox', icon: Inbox },
   { href: '/returns', label: 'Returns', icon: Undo2 },
+  { href: '/inventory', label: 'Inventory', icon: Boxes },
 ];
 
 function NotificationBell() {

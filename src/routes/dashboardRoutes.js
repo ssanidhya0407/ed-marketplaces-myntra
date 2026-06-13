@@ -211,6 +211,49 @@ router.post('/orders/api/action/:sellerOrderId', dashboardGate, async (req, res)
 
 router.get('/orders/api/status-labels', (_req, res) => res.json(STATUS_LABELS));
 
+// Update inventory on Myntra (the M-Direct panel is closed for OMS sellers, so this is
+// the in-OMS replacement). Myntra's API caps at 10 SKUs/call, so we chunk and aggregate.
+router.post('/orders/api/inventory/update', dashboardGate, async (req, res) => {
+  try {
+    const raw = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = raw
+      .map((i) => ({
+        sku: String(i.sku ?? '').trim(),
+        quantity: Number(i.quantity),
+        processingSla: i.processingSla === '' || i.processingSla == null ? 5 : Number(i.processingSla),
+        store_code: String(i.store_code ?? i.storeCode ?? '').trim(),
+      }))
+      .filter((i) => i.sku);
+
+    if (!items.length) return res.status(400).json({ ok: false, error: 'No valid SKU rows provided.' });
+    const bad = items.find((i) => !Number.isFinite(i.quantity) || i.quantity < 0 || !i.store_code);
+    if (bad) return res.status(400).json({ ok: false, error: `Each row needs a SKU, a non-negative quantity, and a store code (check "${bad.sku}").` });
+
+    const failed = [];
+    const chunkErrors = [];
+    for (let k = 0; k < items.length; k += 10) {
+      const chunk = items.slice(k, k + 10);
+      const r = await myntraClient.updateInventory(chunk);
+      const body = r.body || {};
+      if (r.status !== 200 || body.statusType === 'ERROR') {
+        chunkErrors.push({ httpStatus: r.status, statusCode: body.statusCode ?? null, message: body.statusMessage || body.message || 'Update failed', skus: chunk.map((c) => c.sku) });
+      } else if (Array.isArray(body.failedEntries)) {
+        failed.push(...body.failedEntries);
+      }
+    }
+    const failedSkus = new Set([...failed.map((f) => f.sku), ...chunkErrors.flatMap((e) => e.skus)]);
+    return res.json({
+      ok: true,
+      submitted: items.length,
+      succeeded: items.length - failedSkus.size,
+      failed,        // per-SKU rejections with remarks
+      chunkErrors,   // whole-batch failures (rare)
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // ───────── Inbox: orders & returns Myntra PUSHED to our webhook (local store) ─────────
 // Real-time work queue, independent of getOrderList. Status-change actions still hit the
 // live Myntra API (these are real Myntra orders) via /orders/api/action.
