@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   X, Package, MapPin, CreditCard, Calendar, Box, FileText, Download, Loader2, AlertTriangle, Truck,
-  Clock, ShieldCheck, RotateCcw, Receipt, User, Phone, Mail,
+  Clock, ShieldCheck, RotateCcw, Receipt, User, Phone, Mail, Ban,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -461,22 +461,33 @@ function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
   const cancelled = String(l.status_code || '').toUpperCase() === 'IC';
   const discounted = l.mrp && l.lineFinalAmount && Number(l.mrp) !== Number(l.lineFinalAmount);
   return (
-    <div className="rounded-2xl border border-black/[0.06] p-3 flex items-start gap-3 hover:border-black/[0.1] transition-colors">
+    <div className={cx(
+      'rounded-2xl border p-3 flex items-start gap-3 transition-colors',
+      cancelled ? 'border-rose-200/70 bg-rose-50/30' : 'border-black/[0.06] hover:border-black/[0.1]',
+    )}>
       <div className={cx(
         'w-11 h-11 rounded-xl flex items-center justify-center text-[13px] font-bold shrink-0',
-        cancelled ? 'bg-rose-50 text-rose-400' : 'bg-indigo-50 text-indigo-600',
+        cancelled ? 'bg-rose-100 text-rose-500' : 'bg-indigo-50 text-indigo-600',
       )}>
         {(l.sku || '?').slice(0, 2).toUpperCase()}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-zinc-900 text-[13px] truncate">{l.sku || '—'}</span>
+          <span className={cx('font-semibold text-[13px] truncate', cancelled ? 'text-zinc-500 line-through' : 'text-zinc-900')}>{l.sku || '—'}</span>
           <StatusBadge code={l.status_code} />
         </div>
         <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
           Line {l.orderLineId}{l.packetId ? <> · Packet {l.packetId}</> : ''}
         </div>
-        {l.cancellationReason && <div className="text-[10px] text-rose-500 mt-0.5 truncate" title={l.cancellationReason}>{l.cancellationReason}</div>}
+        {l.cancellationReason && (
+          <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-rose-50 border border-rose-200/70 px-2.5 py-1.5">
+            <Ban size={13} className="text-rose-500 mt-px shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[9px] font-bold text-rose-700 uppercase tracking-wide">{cancelled ? 'Cancelled' : 'Cancellation requested'}</div>
+              <p className="text-[11px] text-rose-600 leading-snug">{l.cancellationReason}</p>
+            </div>
+          </div>
+        )}
         {l.packetId ? (
           <div className="flex gap-3 mt-2">
             <a href={api.labelUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
@@ -489,7 +500,7 @@ function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
         ) : null}
       </div>
       <div className="text-right shrink-0">
-        <div className="font-bold text-zinc-900 text-[14px] tabular-nums">{formatINR(l.lineFinalAmount ?? l.mrp)}</div>
+        <div className={cx('font-bold text-[14px] tabular-nums', cancelled ? 'text-zinc-400 line-through' : 'text-zinc-900')}>{formatINR(l.lineFinalAmount ?? l.mrp)}</div>
         {discounted && <div className="text-[10px] text-zinc-400 line-through tabular-nums">{formatINR(l.mrp)}</div>}
       </div>
     </div>
