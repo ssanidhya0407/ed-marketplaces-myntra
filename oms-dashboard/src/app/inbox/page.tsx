@@ -1,11 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { RotateCw, Inbox as InboxIcon } from 'lucide-react';
 import { api, type OrderSummary } from '@/lib/api';
 import OrdersTable from '@/components/OrdersTable';
 import OrderDetailModal from '@/components/OrderDetailModal';
-import StatStrip from '@/components/StatStrip';
 import { useRowDetails } from '@/lib/useRowDetails';
 
 export default function InboxPage() {
@@ -29,19 +28,6 @@ export default function InboxPage() {
 
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, [load]);
 
-  const strip = useMemo(() => {
-    const vals = Object.values(details).filter(Boolean) as Array<{ status: string | null }>;
-    const c = (code: string) => vals.filter((d) => String(d.status || '').toUpperCase() === code).length;
-    return [
-      { label: 'Pushed orders', value: orders.length, tone: 'indigo' as const },
-      { label: 'New', value: c('RFR'), tone: 'blue' as const },
-      { label: 'In progress', value: c('WP'), tone: 'amber' as const },
-      { label: 'Packed', value: c('PK'), tone: 'violet' as const },
-      { label: 'Shipped', value: c('SH'), tone: 'emerald' as const },
-      { label: 'Cancelled', value: c('IC'), tone: 'rose' as const },
-    ];
-  }, [orders, details]);
-
   return (
     <>
       <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
@@ -59,8 +45,6 @@ export default function InboxPage() {
           <RotateCw size={13} /> Refresh
         </button>
       </div>
-
-      <StatStrip stats={strip} />
 
       <div className="rounded-2xl bg-white border border-black/[0.06] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
         {loading && <div className="px-4 py-14 text-center text-sm text-zinc-400">Loading pushed orders…</div>}
