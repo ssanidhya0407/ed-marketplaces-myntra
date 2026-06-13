@@ -373,7 +373,7 @@ export default function OrderDetailModal({
                       ) : !st.ok ? (
                         <p className="text-[12px] text-amber-700">{st.message || 'Invoice details not available yet.'}</p>
                       ) : (
-                        <InvoiceDetails data={st.data} />
+                        <InvoiceDetails data={st.data} customer={detail.receiverName} address={addr} />
                       )}
                     </div>
                   ))}
