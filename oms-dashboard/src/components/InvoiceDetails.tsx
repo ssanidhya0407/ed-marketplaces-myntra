@@ -31,6 +31,27 @@ function fmtValue(key: string, v: any): string {
 const visibleEntries = (obj: any): [string, any][] =>
   Object.entries(obj || {}).filter(([k]) => !ENVELOPE.has(k.toLowerCase()));
 
+// One object flattened to "Label: value · Label: value" (used for nested rows like tax entries).
+const flattenObject = (obj: any): string =>
+  visibleEntries(obj).map(([k, v]) => `${humanize(k)} ${fmtValue(k, v)}`).join(' · ');
+
+// Render a table/grid cell that may itself hold a nested array-of-objects or object,
+// instead of letting String() turn it into "[object Object]".
+function renderCell(key: string, v: any) {
+  if (Array.isArray(v)) {
+    if (v.length && typeof v[0] === 'object') {
+      return (
+        <div className="space-y-0.5">
+          {v.map((o, i) => <div key={i} className="text-zinc-700">{flattenObject(o)}</div>)}
+        </div>
+      );
+    }
+    return v.length ? v.map((x) => fmtValue(key, x)).join(', ') : '—';
+  }
+  if (v && typeof v === 'object') return flattenObject(v) || '—';
+  return fmtValue(key, v);
+}
+
 function ScalarGrid({ obj }: { obj: Record<string, any> }) {
   const rows = visibleEntries(obj).filter(
     ([, v]) => v === null || ['string', 'number', 'boolean'].includes(typeof v),
@@ -66,7 +87,7 @@ function ObjTable({ rows, title }: { rows: any[]; title: string }) {
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {rows.map((r, i) => (
-              <tr key={i}>{cols.map((c) => <td key={c} className="px-2 py-1.5 whitespace-nowrap">{fmtValue(c, r?.[c])}</td>)}</tr>
+              <tr key={i}>{cols.map((c) => <td key={c} className="px-2 py-1.5 align-top whitespace-nowrap">{renderCell(c, r?.[c])}</td>)}</tr>
             ))}
           </tbody>
         </table>
