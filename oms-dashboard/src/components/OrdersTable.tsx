@@ -88,8 +88,10 @@ export default function OrdersTable({
                         <span className="font-semibold text-zinc-900 tabular-nums">{o.orderId}</span>
                         {isNew && <span className="text-[9px] font-bold bg-gradient-to-r from-rose-500 to-pink-500 text-white px-1.5 py-0.5 rounded">NEW</span>}
                       </div>
-                      <div className="text-[11px] text-zinc-500 truncate max-w-[200px]">
-                        {d === undefined ? <span className="text-zinc-300">loading…</span> : (d.sku || '—')}
+                      <div className="text-[11px] text-zinc-500 truncate max-w-[220px]">
+                        {d === undefined ? <span className="text-zinc-300">loading…</span> : (
+                          <>{d.sku || '—'}{d.qty && d.qty > 1 ? <span className="text-zinc-400"> · {d.qty} items</span> : ''}</>
+                        )}
                       </div>
                     </div>
                   </div>

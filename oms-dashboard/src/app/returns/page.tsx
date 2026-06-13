@@ -5,6 +5,7 @@ import { RotateCw, Undo2, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import ReturnDetailModal from '@/components/ReturnDetailModal';
 import OrderDetailModal from '@/components/OrderDetailModal';
+import StatStrip from '@/components/StatStrip';
 import { formatDate } from '@/lib/utils';
 
 interface ReturnRow {
@@ -61,6 +62,18 @@ export default function ReturnsPage() {
     COURIER_RETURN: returns.filter((r) => isRTO(r.type)).length,
   } as Record<string, number>), [returns]);
 
+  const strip = useMemo(() => {
+    const s = (st: string) => returns.filter((r) => String(r.status || '').toUpperCase() === st).length;
+    return [
+      { label: 'Total returns', value: returns.length, tone: 'pink' as const },
+      { label: 'Customer', value: counts.CUSTOMER_RETURN, tone: 'blue' as const },
+      { label: 'RTO', value: counts.COURIER_RETURN, tone: 'amber' as const },
+      { label: 'Confirmed', value: s('CONFIRMED'), tone: 'zinc' as const },
+      { label: 'Delivered', value: s('DELIVERED'), tone: 'emerald' as const },
+      { label: 'Closed', value: s('CANCELLED') + s('DECLINED'), tone: 'rose' as const },
+    ];
+  }, [returns, counts]);
+
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return returns.filter((r) => {
@@ -91,6 +104,8 @@ export default function ReturnsPage() {
           <RotateCw size={13} /> Refresh
         </button>
       </div>
+
+      <StatStrip stats={strip} />
 
       {/* Filters */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
