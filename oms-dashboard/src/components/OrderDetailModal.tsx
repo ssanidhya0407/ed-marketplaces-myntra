@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   X, Package, MapPin, CreditCard, Calendar, Box, FileText, Download, Loader2, AlertTriangle, Truck,
-  Clock, ShieldCheck, RotateCcw, Receipt, User, Phone, Mail, Ban,
+  Clock, ShieldCheck, RotateCcw, Receipt, User, Phone, Mail, Ban, CheckCircle2, Gift, Zap, PauseCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -50,15 +50,15 @@ export default function OrderDetailModal({
     /* eslint-disable-next-line */
   }, [sellerOrderId]);
 
-  // Auto-load invoice details for every dispatched packet on this order (live only).
-  // Myntra has no invoice before RTD, so we only ask for PK/SH/DL packets.
+  // Auto-load invoice details for any packet on this order (live only). A packet only
+  // exists once the order was RTD'd, so it always has a label + invoice — including
+  // shipped, delivered, completed and cancelled-after-pack orders (which show the docs).
   useEffect(() => {
     if (source !== 'live' || !detail || detail._error) return;
-    const dispatched = ['PK', 'SH', 'DL'];
     const packets: string[] = Array.from(
       new Set(
         (detail.orderLineEntries || [])
-          .filter((l: any) => l.packetId && dispatched.includes(l.status_code))
+          .filter((l: any) => l.packetId)
           .map((l: any) => String(l.packetId)),
       ),
     );
@@ -96,6 +96,39 @@ export default function OrderDetailModal({
   const trackingNo: string =
     detail?.trackingNumber || lines.find((l) => l.trackingNumber)?.trackingNumber || rtdTracking || '';
   const addr = detail && [detail.address, detail.locality, detail.city, detail.stateName || detail.state, detail.zipcode, detail.country].filter(Boolean).join(', ');
+
+  // ---- Stage- and type-aware context ----
+  const su = String(headStatus || '').toUpperCase();
+  const stage = STAGES[su] || { tone: 'zinc', icon: Box, title: su || 'Order', desc: '' };
+  const courier = detail?.courierCode || lines.find((l) => l.courierCode)?.courierCode || '';
+  const eta = lines.find((l) => l.expectedDeliveryTime)?.expectedDeliveryTime || detail?.expectedDeliveryTime;
+  const packedOn = lines.find((l) => l.packedOn)?.packedOn;
+  const packetId = lines.find((l) => l.packetId)?.packetId;
+  const lineCancelReason = lines.find((l) => l.cancellationReason)?.cancellationReason;
+  const lineCancelledOn = lines.find((l) => l.cancelledOn)?.cancelledOn;
+  const isPrepaid = ['on', 'prepaid'].includes(String(detail?.paymentMethod || '').toLowerCase());
+  const flags = { gift: lines.some((l) => l.gift), priority: lines.some((l) => l.priority), onHold: lines.some((l) => l.onHold) };
+  const dispatched = ['PK', 'RTD', 'SH', 'OFD', 'DL'].includes(su);
+
+  const stageDesc =
+    (su === 'SH' || su === 'OFD') ? `In transit${courier ? ' · ' + courier : ''}${trackingNo ? ' · ' + trackingNo : ''}`
+      : su === 'IC' ? (lineCancelReason || stage.desc)
+        : stage.desc;
+
+  // Quick-fact pills, chosen by stage.
+  const pills: Array<{ icon: LucideIcon; label: string; value: string }> = [{ icon: CreditCard, label: 'Payment', value: isPrepaid ? 'Prepaid' : 'COD' }];
+  if (su === 'RFR' || su === 'WP') {
+    pills.push({ icon: Calendar, label: 'Ship by', value: formatDate(lines[0]?.shipByTime) || '—' });
+    pills.push({ icon: Box, label: 'Warehouse', value: lines[0]?.warehouse || '—' });
+  } else if (dispatched) {
+    if (courier) pills.push({ icon: Truck, label: 'Courier', value: courier });
+    if (trackingNo) pills.push({ icon: Truck, label: 'Tracking', value: trackingNo });
+    if (su === 'DL') pills.push({ icon: ShieldCheck, label: 'Delivered', value: 'Yes' });
+    else if (eta) pills.push({ icon: Calendar, label: 'Est. delivery', value: formatDate(eta) || '—' });
+  } else if (su === 'IC' && lineCancelledOn) {
+    pills.push({ icon: Calendar, label: 'Cancelled on', value: formatDate(lineCancelledOn) || '—' });
+  }
+  pills.push({ icon: Box, label: 'Items', value: String(lines.length) });
 
   async function runAction(action: ActionKey) {
     const orderLineIds = lines.map((l) => l.orderLineId).filter(Boolean);
@@ -232,10 +265,13 @@ export default function OrderDetailModal({
               <Package size={18} className="text-white" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-[15px] font-bold text-zinc-900">Order details</h2>
                 {headStatus !== undefined && <StatusBadge code={headStatus} />}
                 {source === 'inbox' && <span className="text-[9px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5">INBOX</span>}
+                {flags.priority && <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5"><Zap size={9} /> PRIORITY</span>}
+                {flags.gift && <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-pink-700 bg-pink-50 border border-pink-200 rounded px-1.5 py-0.5"><Gift size={9} /> GIFT</span>}
+                {flags.onHold && <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-zinc-600 bg-zinc-100 border border-zinc-200 rounded px-1.5 py-0.5"><PauseCircle size={9} /> ON HOLD</span>}
               </div>
               <span className="text-[11px] font-mono text-zinc-400 truncate block">{sellerOrderId}</span>
             </div>
@@ -256,19 +292,24 @@ export default function OrderDetailModal({
 
         {!loading && detail && !detail._error && (
           <div className="px-6 py-5 space-y-6">
-            {/* Hero: total + key meta */}
-            <div className="rounded-2xl border border-black/[0.06] bg-gradient-to-br from-zinc-50 to-white p-4 flex items-center justify-between flex-wrap gap-4">
-              <div>
-                <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Order total</div>
-                <div className="text-[26px] font-bold text-zinc-900 leading-tight tabular-nums">{formatINR(orderTotal)}</div>
-                <div className="text-[11px] text-zinc-400 mt-0.5">{lines.length} item{lines.length !== 1 ? 's' : ''}</div>
+            {/* Stage banner: what's the state + what to do next */}
+            <div className={cx('rounded-2xl border p-4 flex items-center justify-between gap-4 flex-wrap', BANNER_TONE[stage.tone])}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center shrink-0"><stage.icon size={18} /></div>
+                <div className="min-w-0">
+                  <div className="text-[14px] font-bold leading-tight">{stage.title}</div>
+                  <div className="text-[12px] opacity-80 break-words">{stageDesc}</div>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Stat icon={CreditCard} label="Payment" value={(detail.paymentMethod || '—').toUpperCase()} />
-                <Stat icon={Calendar} label="Ship by" value={formatDate(lines[0]?.shipByTime) || '—'} />
-                <Stat icon={Truck} label="Warehouse" value={lines[0]?.warehouse || '—'} />
-                {trackingNo && <Stat icon={Truck} label="Tracking" value={trackingNo} />}
+              <div className="text-right shrink-0">
+                <div className="text-[10px] font-semibold uppercase tracking-wider opacity-70">Order total</div>
+                <div className="text-[22px] font-bold text-zinc-900 tabular-nums leading-none">{formatINR(orderTotal)}</div>
               </div>
+            </div>
+
+            {/* Quick facts — vary by stage */}
+            <div className="flex flex-wrap gap-2">
+              {pills.map((p) => <Stat key={p.label} icon={p.icon} label={p.label} value={p.value} />)}
             </div>
 
             {/* Timeline */}
@@ -299,6 +340,20 @@ export default function OrderDetailModal({
                 {lines.map((l) => <ItemRow key={l.orderLineId} l={l} source={source} />)}
               </div>
             </Section>
+
+            {/* Shipment — shown whenever a packet/tracking exists (packed → delivered,
+                completed, or cancelled-after-pack) */}
+            {(trackingNo || courier || packetId) && (
+              <Section title="Shipment" icon={Truck}>
+                <div className="rounded-2xl border border-black/[0.06] p-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <Field icon={Truck} label="Courier" value={courier || undefined} />
+                  <Field icon={Truck} label="Tracking" value={trackingNo || undefined} />
+                  <Field icon={Box} label="Packet" value={packetId || undefined} />
+                  <Field icon={Calendar} label="Packed on" value={packedOn ? formatDate(packedOn) : undefined} />
+                  <Field icon={su === 'DL' ? ShieldCheck : Calendar} label={su === 'DL' ? 'Delivered' : 'Est. delivery'} value={eta ? formatDate(eta) : undefined} />
+                </div>
+              </Section>
+            )}
 
             {/* Invoice details — auto-loaded from Myntra for dispatched packets */}
             {source === 'live' && Object.keys(invByPacket).length > 0 && (
@@ -427,6 +482,29 @@ export default function OrderDetailModal({
     </div>
   );
 }
+
+// Per-stage banner: title, helper text (next step), icon, colour.
+const STAGES: Record<string, { tone: string; icon: LucideIcon; title: string; desc: string }> = {
+  RFR: { tone: 'blue', icon: Clock, title: 'New — awaiting release', desc: 'Myntra will release this to Work in Progress. No seller action yet.' },
+  WP: { tone: 'amber', icon: Package, title: 'Ready to process', desc: 'Pack the item, then mark it Ready to Dispatch.' },
+  PK: { tone: 'violet', icon: Box, title: 'Packed', desc: 'Print the label & invoice, then mark Ready to Ship.' },
+  RTD: { tone: 'violet', icon: Box, title: 'Ready to dispatch', desc: 'Print the label & invoice, then mark Ready to Ship.' },
+  SH: { tone: 'emerald', icon: Truck, title: 'Shipped', desc: 'In transit to the customer.' },
+  OFD: { tone: 'emerald', icon: Truck, title: 'Out for delivery', desc: 'With the courier for delivery.' },
+  DL: { tone: 'green', icon: ShieldCheck, title: 'Delivered', desc: 'Delivered to the customer.' },
+  IC: { tone: 'rose', icon: Ban, title: 'Cancelled', desc: 'This order was cancelled.' },
+  C: { tone: 'zinc', icon: CheckCircle2, title: 'Completed', desc: 'Order closed.' },
+  RTO: { tone: 'rose', icon: RotateCcw, title: 'Returned to origin', desc: 'The shipment came back.' },
+};
+const BANNER_TONE: Record<string, string> = {
+  blue: 'bg-blue-50 border-blue-200 text-blue-800',
+  amber: 'bg-amber-50 border-amber-200 text-amber-800',
+  violet: 'bg-violet-50 border-violet-200 text-violet-800',
+  emerald: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+  green: 'bg-green-50 border-green-200 text-green-800',
+  rose: 'bg-rose-50 border-rose-200 text-rose-800',
+  zinc: 'bg-zinc-50 border-zinc-200 text-zinc-700',
+};
 
 function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
