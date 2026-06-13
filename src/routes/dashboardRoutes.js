@@ -45,6 +45,7 @@ function inboxDetail(o) {
       trackingNumber: o.trackingNumber || null, taxEntries: l.taxEntries || [],
       shipByTime: l.shipByTime, packByTime: l.packByTime, customerPromiseTime: l.customerPromiseTime,
       cancellationReason: l.cancellationReason || null,
+      cancellationCode: l.cancellationCode ?? null, cancelledOn: l.cancelledOn || null,
     })),
   };
 }
