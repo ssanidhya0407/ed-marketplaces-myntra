@@ -108,10 +108,10 @@ export default function OrderDetailModal({
   const lineCancelledOn = lines.find((l) => l.cancelledOn)?.cancelledOn;
   const isPrepaid = ['on', 'prepaid'].includes(String(detail?.paymentMethod || '').toLowerCase());
   const flags = { gift: lines.some((l) => l.gift), priority: lines.some((l) => l.priority), onHold: lines.some((l) => l.onHold) };
-  const dispatched = ['PK', 'RTD', 'SH', 'OFD', 'DL'].includes(su);
+  const dispatched = ['PK', 'RTD', 'SH', 'S', 'OFD', 'DL', 'D'].includes(su);
 
   const stageDesc =
-    (su === 'SH' || su === 'OFD') ? `In transit${courier ? ' · ' + courier : ''}${trackingNo ? ' · ' + trackingNo : ''}`
+    (su === 'SH' || su === 'S' || su === 'OFD') ? `In transit${courier ? ' · ' + courier : ''}${trackingNo ? ' · ' + trackingNo : ''}`
       : su === 'IC' ? (lineCancelReason || stage.desc)
         : stage.desc;
 
@@ -123,7 +123,7 @@ export default function OrderDetailModal({
   } else if (dispatched) {
     if (courier) pills.push({ icon: Truck, label: 'Courier', value: courier });
     if (trackingNo) pills.push({ icon: Truck, label: 'Tracking', value: trackingNo });
-    if (su === 'DL') pills.push({ icon: ShieldCheck, label: 'Delivered', value: 'Yes' });
+    if (su === 'DL' || su === 'D') pills.push({ icon: ShieldCheck, label: 'Delivered', value: 'Yes' });
     else if (eta) pills.push({ icon: Calendar, label: 'Est. delivery', value: formatDate(eta) || '—' });
   } else if (su === 'IC' && lineCancelledOn) {
     pills.push({ icon: Calendar, label: 'Cancelled on', value: formatDate(lineCancelledOn) || '—' });
@@ -490,8 +490,10 @@ const STAGES: Record<string, { tone: string; icon: LucideIcon; title: string; de
   PK: { tone: 'violet', icon: Box, title: 'Packed', desc: 'Print the label & invoice, then mark Ready to Ship.' },
   RTD: { tone: 'violet', icon: Box, title: 'Ready to dispatch', desc: 'Print the label & invoice, then mark Ready to Ship.' },
   SH: { tone: 'emerald', icon: Truck, title: 'Shipped', desc: 'In transit to the customer.' },
+  S: { tone: 'emerald', icon: Truck, title: 'Shipped', desc: 'In transit to the customer.' },
   OFD: { tone: 'emerald', icon: Truck, title: 'Out for delivery', desc: 'With the courier for delivery.' },
   DL: { tone: 'green', icon: ShieldCheck, title: 'Delivered', desc: 'Delivered to the customer.' },
+  D: { tone: 'green', icon: ShieldCheck, title: 'Delivered', desc: 'Delivered to the customer.' },
   IC: { tone: 'rose', icon: Ban, title: 'Cancelled', desc: 'This order was cancelled.' },
   C: { tone: 'zinc', icon: CheckCircle2, title: 'Completed', desc: 'Order closed.' },
   RTO: { tone: 'rose', icon: RotateCcw, title: 'Returned to origin', desc: 'The shipment came back.' },
@@ -612,9 +614,9 @@ function buildTimeline(code: string | null | undefined): Step[] {
       { key: 'rto', label: 'Returned', icon: RotateCcw, done: true, cancelled: true },
     ];
   }
-  const packed = ['PK', 'RTD', 'RTS', 'SH', 'OFD', 'DL'].includes(s);
-  const shipped = ['SH', 'OFD', 'DL'].includes(s);
-  const delivered = s === 'DL';
+  const packed = ['PK', 'RTD', 'RTS', 'SH', 'S', 'OFD', 'DL', 'D'].includes(s);
+  const shipped = ['SH', 'S', 'OFD', 'DL', 'D'].includes(s);
+  const delivered = s === 'DL' || s === 'D';
   return [
     { key: 'placed', label: 'New', icon: Box, done: true },
     { key: 'packed', label: 'Packed', icon: Package, done: packed },
