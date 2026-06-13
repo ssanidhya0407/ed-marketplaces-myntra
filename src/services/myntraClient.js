@@ -226,6 +226,14 @@ function markReadyToDispatch({ warehouse, orderLineEntries = [] } = {}) {
   return myntraSend('PUT', '/partner/v4/order/readyToDispatch/', { warehouse, orderLineEntries });
 }
 
+// Update Inventory: PUT /partner/v4/inventory/update — array of up to 10 SKUs.
+// Each item: { quantity, sku, processingSla, store_code }. Returns 1001 on success.
+function updateInventory(items = []) {
+  if (!items.length) throw new AppError(2006, 'At least one inventory item is required');
+  if (items.length > 10) throw new AppError(2006, 'Max 10 SKUs per inventory update call');
+  return myntraSend('PUT', '/partner/v4/inventory/update', items);
+}
+
 module.exports = {
   generateToken,
   fetchOrderList,
@@ -240,4 +248,5 @@ module.exports = {
   cancelOrderItems,
   markReadyToShip,
   markReadyToDispatch,
+  updateInventory,
 };
