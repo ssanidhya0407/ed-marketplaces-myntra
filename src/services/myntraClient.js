@@ -214,10 +214,12 @@ function cancelOrderItems(sellerOrderId, { orderLineIds = [], comment = 'Cancell
   );
 }
 
-// Ready To Ship: PUT /partner/v4/trackingNumber/:trackingNo/readyToShip  (no body)
+// Ready To Ship: PUT /partner/v4/trackingNumber/:trackingNo/readyToShip
+// Send an empty JSON body so a Content-Length is always set — a bodyless PUT is
+// rejected by Myntra's Akamai edge with 411 Length Required before it reaches the app.
 function markReadyToShip(trackingNo) {
   if (!trackingNo) throw new AppError(2006, 'trackingNumber is required');
-  return myntraSend('PUT', `/partner/v4/trackingNumber/${encodeURIComponent(trackingNo)}/readyToShip`);
+  return myntraSend('PUT', `/partner/v4/trackingNumber/${encodeURIComponent(trackingNo)}/readyToShip`, {});
 }
 
 // Ready To Dispatch: PUT /partner/v4/order/readyToDispatch  body={warehouse, orderLineEntries:[...]}
