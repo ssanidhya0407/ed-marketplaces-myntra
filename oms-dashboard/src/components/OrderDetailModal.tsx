@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   X, Package, MapPin, CreditCard, Calendar, Box, FileText, Download, Loader2, AlertTriangle, Truck,
-  Clock, ShieldCheck, RotateCcw, Receipt,
+  Clock, ShieldCheck, RotateCcw, Receipt, User, Phone, Mail,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -89,6 +89,7 @@ export default function OrderDetailModal({
   const lines: any[] = detail?.orderLineEntries || [];
   const headStatus = lines[0]?.status_code;
   const actions = allowedActions(headStatus);
+  const orderTotal = lines.reduce((s, l) => s + (Number(l.lineFinalAmount ?? l.mrp) || 0), 0);
   // Myntra assigns the tracking number at RTD; it arrives at the order top level
   // (e.g. "trackingNumber": "MYEC1105151644"), with a line-level fallback.
   const trackingNo: string =
@@ -220,112 +221,90 @@ export default function OrderDetailModal({
       onClick={onClose}
     >
       <div
-        className="relative bg-white rounded-2xl w-full max-w-[820px] max-h-[90vh] overflow-y-auto shadow-2xl animate-modal-content"
+        className="relative bg-white rounded-2xl w-full max-w-[840px] max-h-[92vh] overflow-y-auto shadow-2xl animate-modal-content"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-black/[0.06] px-6 py-4 rounded-t-2xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
-              <Package size={18} className="text-indigo-600" />
+        <div className="sticky top-0 z-10 bg-white/90 backdrop-blur-md border-b border-black/[0.06] px-6 py-3.5 rounded-t-2xl flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm shrink-0">
+              <Package size={18} className="text-white" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-bold text-zinc-900">Order Details</h2>
+                <h2 className="text-[15px] font-bold text-zinc-900">Order details</h2>
                 {headStatus !== undefined && <StatusBadge code={headStatus} />}
+                {source === 'inbox' && <span className="text-[9px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5">INBOX</span>}
               </div>
-              <span className="text-[11px] font-mono text-zinc-400">{sellerOrderId}</span>
+              <span className="text-[11px] font-mono text-zinc-400 truncate block">{sellerOrderId}</span>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-zinc-50 hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-zinc-700 transition-colors">
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-zinc-50 hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-zinc-700 transition-colors shrink-0">
             <X size={16} />
           </button>
         </div>
 
         {loading && (
-          <div className="px-6 py-16 text-center text-zinc-400">
-            <Loader2 size={20} className="animate-spin inline mr-2" /> Loading from Myntra…
+          <div className="px-6 py-20 text-center text-zinc-400">
+            <Loader2 size={22} className="animate-spin inline mr-2" /> Loading from Myntra…
           </div>
         )}
         {!loading && detail?._error && (
-          <div className="px-6 py-10 text-center text-rose-600 text-sm">{detail._error}</div>
+          <div className="px-6 py-12 text-center text-rose-600 text-sm">{detail._error}</div>
         )}
 
         {!loading && detail && !detail._error && (
           <div className="px-6 py-5 space-y-6">
-            {/* Summary cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <InfoCard icon={Calendar} label="Ship By" value={formatDate(lines[0]?.shipByTime)} />
-              <InfoCard icon={CreditCard} label="Payment" value={(detail.paymentMethod || '—').toUpperCase()} highlight />
-              <InfoCard icon={Box} label="Items" value={String(lines.length)} />
-              <InfoCard icon={Truck} label="Warehouse" value={lines[0]?.warehouse || '—'} />
+            {/* Hero: total + key meta */}
+            <div className="rounded-2xl border border-black/[0.06] bg-gradient-to-br from-zinc-50 to-white p-4 flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Order total</div>
+                <div className="text-[26px] font-bold text-zinc-900 leading-tight tabular-nums">{formatINR(orderTotal)}</div>
+                <div className="text-[11px] text-zinc-400 mt-0.5">{lines.length} item{lines.length !== 1 ? 's' : ''}</div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Stat icon={CreditCard} label="Payment" value={(detail.paymentMethod || '—').toUpperCase()} />
+                <Stat icon={Calendar} label="Ship by" value={formatDate(lines[0]?.shipByTime) || '—'} />
+                <Stat icon={Truck} label="Warehouse" value={lines[0]?.warehouse || '—'} />
+                {trackingNo && <Stat icon={Truck} label="Tracking" value={trackingNo} />}
+              </div>
             </div>
 
             {/* Timeline */}
-            <Section title="Order Timeline" icon={Clock}>
-              <Timeline status={headStatus} placedDate={lines[0]?.shipByTime} />
+            <Section title="Order timeline" icon={Clock}>
+              <div className="rounded-2xl border border-black/[0.06] px-4 py-4">
+                <Timeline status={headStatus} placedDate={lines[0]?.shipByTime} />
+              </div>
             </Section>
 
-            {/* Customer */}
+            {/* Customer & shipping */}
             <Section title="Customer & shipping" icon={MapPin}>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <DetailRow label="Customer" value={detail.receiverName} />
-                <DetailRow label="Mobile" value={detail.mobile} />
-                <DetailRow label="Email" value={detail.email} />
+              <div className="rounded-2xl border border-black/[0.06] p-4 space-y-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Field icon={User} label="Customer" value={detail.receiverName} />
+                  <Field icon={Phone} label="Mobile" value={detail.mobile} />
+                  <Field icon={Mail} label="Email" value={detail.email} />
+                </div>
+                <div className="pt-3.5 border-t border-black/[0.05]">
+                  <div className="flex items-center gap-1 text-[9px] font-semibold text-zinc-400 uppercase tracking-wider"><MapPin size={10} /> Shipping address</div>
+                  <p className="text-[13px] text-zinc-700 mt-1 leading-relaxed">{addr || '—'}</p>
+                </div>
               </div>
-              <div className="mt-3"><DetailRow label="Address" value={addr} /></div>
             </Section>
 
             {/* Items */}
             <Section title={`Items (${lines.length})`} icon={Box}>
-              <div className="rounded-xl border border-black/[0.06] overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-zinc-50/80 text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">
-                    <tr>
-                      <th className="px-3 py-2 text-left">SKU</th>
-                      <th className="px-3 py-2 text-left">Line ID</th>
-                      <th className="px-3 py-2 text-right">Amount</th>
-                      <th className="px-3 py-2 text-left">Status</th>
-                      <th className="px-3 py-2 text-left">Packet</th>
-                      <th className="px-3 py-2 text-left">Documents</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-100">
-                    {lines.map((l) => (
-                      <tr key={l.orderLineId}>
-                        <td className="px-3 py-2">
-                          <div className="font-semibold text-zinc-800">{l.sku || '—'}</div>
-                          {l.cancellationReason && <div className="text-[10px] text-zinc-400 max-w-[180px] truncate" title={l.cancellationReason}>{l.cancellationReason}</div>}
-                        </td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-zinc-600">{l.orderLineId}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-zinc-900">{formatINR(l.lineFinalAmount ?? l.mrp)}</td>
-                        <td className="px-3 py-2"><StatusBadge code={l.status_code} /></td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-zinc-600">{l.packetId || '—'}</td>
-                        <td className="px-3 py-2">
-                          {l.packetId ? (
-                            <div className="flex gap-2">
-                              <a href={api.labelUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
-                                <Download size={11} /> Label
-                              </a>
-                              <a href={api.invoiceUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
-                                <FileText size={11} /> Invoice
-                              </a>
-                            </div>
-                          ) : <span className="text-[11px] text-zinc-400">no packet</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-2">
+                {lines.map((l) => <ItemRow key={l.orderLineId} l={l} source={source} />)}
               </div>
             </Section>
 
             {/* Invoice details — auto-loaded from Myntra for dispatched packets */}
             {source === 'live' && Object.keys(invByPacket).length > 0 && (
               <Section title="Invoice details" icon={Receipt}>
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {Object.entries(invByPacket).map(([pid, st]) => (
-                    <div key={pid} className="rounded-xl border border-black/[0.06] bg-white p-3">
+                    <div key={pid} className="rounded-2xl border border-black/[0.06] bg-zinc-50/40 p-3">
                       <div className="flex items-center justify-between mb-2.5">
                         <div className="text-[11px] text-zinc-500">Packet <span className="font-mono text-zinc-700">{pid}</span></div>
                         <button onClick={() => refreshInvoice(pid)} disabled={st.loading}
@@ -348,9 +327,9 @@ export default function OrderDetailModal({
 
             {/* Cancel form */}
             {cancelOpen && (
-              <div className="bg-rose-50/40 border border-rose-200/60 rounded-xl p-4 space-y-3">
+              <div className="bg-rose-50/50 border border-rose-200/70 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-[12px] font-semibold text-rose-700 flex items-center gap-1.5"><X size={13} /> Cancel order — reason required</h4>
+                  <h4 className="text-[12px] font-semibold text-rose-700 flex items-center gap-1.5"><AlertTriangle size={13} /> Cancel order — reason required</h4>
                   <button onClick={() => setCancelOpen(false)} className="text-zinc-400 hover:text-zinc-700"><X size={14} /></button>
                 </div>
                 <input value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="e.g. Out of stock"
@@ -367,7 +346,7 @@ export default function OrderDetailModal({
 
             {/* Ready-to-Dispatch form (PPMP) */}
             {rtdOpen && (
-              <div className="bg-indigo-50/40 border border-indigo-200/60 rounded-xl p-4 space-y-3">
+              <div className="bg-indigo-50/50 border border-indigo-200/70 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[12px] font-semibold text-indigo-700 flex items-center gap-1.5"><Truck size={13} /> Ready to Dispatch — pack &amp; generate label</h4>
                   <button onClick={() => setRtdOpen(false)} className="text-zinc-400 hover:text-zinc-700"><X size={14} /></button>
@@ -375,14 +354,14 @@ export default function OrderDetailModal({
                 <div className="rounded-lg border border-black/[0.06] overflow-hidden bg-white">
                   <table className="w-full text-[11px]">
                     <thead className="bg-zinc-50 text-[9px] uppercase text-zinc-500">
-                      <tr><th className="px-2 py-1.5 text-left">SKU</th><th className="px-2 py-1.5 text-right">Unit total</th><th className="px-2 py-1.5 text-left">Tax</th></tr>
+                      <tr><th className="px-2.5 py-1.5 text-left">SKU</th><th className="px-2.5 py-1.5 text-right">Unit total</th><th className="px-2.5 py-1.5 text-left">Tax</th></tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
                       {lines.map((l) => (
                         <tr key={l.orderLineId}>
-                          <td className="px-2 py-1.5 font-semibold">{l.sku}</td>
-                          <td className="px-2 py-1.5 text-right">{formatINR(l.lineFinalAmount ?? l.mrp)}</td>
-                          <td className="px-2 py-1.5 text-zinc-500">
+                          <td className="px-2.5 py-1.5 font-semibold">{l.sku}</td>
+                          <td className="px-2.5 py-1.5 text-right tabular-nums">{formatINR(l.lineFinalAmount ?? l.mrp)}</td>
+                          <td className="px-2.5 py-1.5 text-zinc-500">
                             {Array.isArray(l.taxEntries) && l.taxEntries.length
                               ? l.taxEntries.map((t: any, i: number) => <span key={i}>{t.taxType} {t.taxRate}%{i < l.taxEntries.length - 1 ? ', ' : ''}</span>)
                               : <span className="text-zinc-400">none on order</span>}
@@ -407,7 +386,7 @@ export default function OrderDetailModal({
 
         {/* Footer actions */}
         {!loading && detail && !detail._error && (
-          <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-black/[0.06] px-6 py-4 rounded-b-2xl flex items-center justify-between gap-3 flex-wrap">
+          <div className="sticky bottom-0 bg-white/90 backdrop-blur-md border-t border-black/[0.06] px-6 py-3.5 rounded-b-2xl flex items-center justify-between gap-3 flex-wrap">
             <span className="text-[11px] text-zinc-400 flex items-center gap-1.5">
               <AlertTriangle size={12} /> Actions hit the live Myntra account and confirm first.
             </span>
@@ -415,7 +394,7 @@ export default function OrderDetailModal({
               {actions.length === 0 ? (
                 <span className="text-[12px] text-zinc-400">
                   {isAwaitingRelease(headStatus)
-                    ? 'Received — awaiting release to Work in Progress by Myntra. Ready to Dispatch unlocks then.'
+                    ? 'Received — awaiting release to Work in Progress by Myntra.'
                     : 'No further seller action for this status.'}
                 </span>
               ) : actions.map((a) => {
@@ -448,33 +427,71 @@ export default function OrderDetailModal({
   );
 }
 
-function InfoCard({ icon: Icon, label, value, highlight }: { icon: LucideIcon; label: string; value: string; highlight?: boolean }) {
+function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
-    <div className="bg-zinc-50/80 rounded-xl p-3 border border-black/[0.03]">
-      <div className="flex items-center gap-1.5 mb-1">
-        <Icon size={12} className="text-zinc-400" />
-        <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">{label}</span>
-      </div>
-      <p className={cx('text-[14px] font-semibold', highlight ? 'text-indigo-600' : 'text-zinc-800')}>{value}</p>
+    <div className="bg-white border border-black/[0.06] rounded-xl px-3 py-2 min-w-[104px]">
+      <div className="flex items-center gap-1 text-[9px] font-semibold text-zinc-400 uppercase tracking-wider"><Icon size={10} /> {label}</div>
+      <div className="text-[12px] font-semibold text-zinc-800 mt-0.5 truncate max-w-[160px]">{value}</div>
     </div>
   );
 }
+
 function Section({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-2.5">
         <Icon size={14} className="text-indigo-500" />
-        <h3 className="text-[12px] font-semibold text-zinc-900 uppercase tracking-wider">{title}</h3>
+        <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{title}</h3>
       </div>
       {children}
     </div>
   );
 }
-function DetailRow({ label, value }: { label: string; value?: string }) {
+
+function Field({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value?: string }) {
   return (
-    <div>
-      <span className="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">{label}</span>
-      <p className="text-[13px] text-zinc-700 mt-0.5">{value || '—'}</p>
+    <div className="min-w-0">
+      <div className="flex items-center gap-1 text-[9px] font-semibold text-zinc-400 uppercase tracking-wider"><Icon size={10} /> {label}</div>
+      <p className="text-[13px] text-zinc-800 font-medium mt-0.5 truncate">{value || '—'}</p>
+    </div>
+  );
+}
+
+function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
+  const cancelled = String(l.status_code || '').toUpperCase() === 'IC';
+  const discounted = l.mrp && l.lineFinalAmount && Number(l.mrp) !== Number(l.lineFinalAmount);
+  return (
+    <div className="rounded-2xl border border-black/[0.06] p-3 flex items-start gap-3 hover:border-black/[0.1] transition-colors">
+      <div className={cx(
+        'w-11 h-11 rounded-xl flex items-center justify-center text-[13px] font-bold shrink-0',
+        cancelled ? 'bg-rose-50 text-rose-400' : 'bg-indigo-50 text-indigo-600',
+      )}>
+        {(l.sku || '?').slice(0, 2).toUpperCase()}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-zinc-900 text-[13px] truncate">{l.sku || '—'}</span>
+          <StatusBadge code={l.status_code} />
+        </div>
+        <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+          Line {l.orderLineId}{l.packetId ? <> · Packet {l.packetId}</> : ''}
+        </div>
+        {l.cancellationReason && <div className="text-[10px] text-rose-500 mt-0.5 truncate" title={l.cancellationReason}>{l.cancellationReason}</div>}
+        {l.packetId ? (
+          <div className="flex gap-3 mt-2">
+            <a href={api.labelUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+              <Download size={11} /> Label
+            </a>
+            <a href={api.invoiceUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-800">
+              <FileText size={11} /> Invoice
+            </a>
+          </div>
+        ) : null}
+      </div>
+      <div className="text-right shrink-0">
+        <div className="font-bold text-zinc-900 text-[14px] tabular-nums">{formatINR(l.lineFinalAmount ?? l.mrp)}</div>
+        {discounted && <div className="text-[10px] text-zinc-400 line-through tabular-nums">{formatINR(l.mrp)}</div>}
+      </div>
     </div>
   );
 }
@@ -511,16 +528,16 @@ function buildTimeline(code: string | null | undefined): Step[] {
 function Timeline({ status, placedDate }: { status: string | null | undefined; placedDate?: string }) {
   const steps = buildTimeline(status);
   return (
-    <div className="flex items-center overflow-x-auto py-1">
+    <div className="flex items-start justify-between">
       {steps.map((step, idx) => {
         const StepIcon = step.icon;
         const isLast = idx === steps.length - 1;
         return (
-          <div key={step.key} className="flex items-center">
+          <div key={step.key} className="flex items-start flex-1 last:flex-none">
             <div className="flex flex-col items-center">
               <div
                 className={cx(
-                  'w-9 h-9 rounded-full flex items-center justify-center border-2 transition-colors',
+                  'w-10 h-10 rounded-full flex items-center justify-center border-2 transition-colors',
                   step.cancelled
                     ? 'bg-rose-50 border-rose-300 text-rose-500'
                     : step.done
@@ -528,14 +545,14 @@ function Timeline({ status, placedDate }: { status: string | null | undefined; p
                       : 'bg-zinc-50 border-zinc-200 text-zinc-300',
                 )}
               >
-                <StepIcon size={15} />
+                <StepIcon size={16} />
               </div>
               <span className={cx('text-[10px] font-medium mt-1.5 whitespace-nowrap', step.done ? 'text-zinc-700' : 'text-zinc-300')}>
                 {step.label}
               </span>
             </div>
             {!isLast && (
-              <div className={cx('w-12 h-0.5 mx-1 mt-[-16px] rounded-full', steps[idx + 1].done ? 'bg-emerald-300' : 'bg-zinc-200')} />
+              <div className={cx('flex-1 h-0.5 mt-5 mx-1 rounded-full', steps[idx + 1].done ? 'bg-emerald-300' : 'bg-zinc-200')} />
             )}
           </div>
         );
