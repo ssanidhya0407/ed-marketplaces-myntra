@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, type OrderSummary } from './api';
+import { skuImage } from './skuImage';
 
 // The order LIST is sparse (id, sellerOrderId, status). To show SKU, amount and
 // document buttons in the table we resolve each row's detail once and cache it.
@@ -61,7 +62,7 @@ export function useRowDetails(orders: OrderSummary[], source: 'live' | 'inbox' =
               packetId: withPacket?.packetId ?? null,
               sku: first.sku ?? null,
               amount: first.lineFinalAmount ?? first.mrp ?? null,
-              image: first.imageUrl ?? first.image ?? null,
+              image: first.imageUrl ?? first.image ?? skuImage(first.sku) ?? null,
               qty: lines.length || null,
               status: first.status_code ?? null,
               invoiceNumber: withInvoice?.invoiceNumber ?? null,

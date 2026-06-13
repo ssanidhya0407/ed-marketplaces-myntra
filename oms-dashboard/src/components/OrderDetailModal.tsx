@@ -11,6 +11,7 @@ import { formatINR, formatDate, cx } from '@/lib/utils';
 import { allowedActions, ACTION_META, isAwaitingRelease, type ActionKey } from '@/lib/status';
 import StatusBadge from './StatusBadge';
 import InvoiceDetails from './InvoiceDetails';
+import { skuImage } from '@/lib/skuImage';
 import { useNotifications } from './NotificationProvider';
 
 export default function OrderDetailModal({
@@ -462,17 +463,23 @@ function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
   // cancellationReason with no cancelledOn is a *request* that was never actioned.
   const cancelled = String(l.status_code || '').toUpperCase() === 'IC' || !!l.cancelledOn;
   const discounted = l.mrp && l.lineFinalAmount && Number(l.mrp) !== Number(l.lineFinalAmount);
+  const img = l.imageUrl || l.image || skuImage(l.sku);
   return (
     <div className={cx(
       'rounded-2xl border p-3 flex items-start gap-3 transition-colors',
       cancelled ? 'border-rose-200/70 bg-rose-50/30' : 'border-black/[0.06] hover:border-black/[0.1]',
     )}>
-      <div className={cx(
-        'w-11 h-11 rounded-xl flex items-center justify-center text-[13px] font-bold shrink-0',
-        cancelled ? 'bg-rose-100 text-rose-500' : 'bg-indigo-50 text-indigo-600',
-      )}>
-        {(l.sku || '?').slice(0, 2).toUpperCase()}
-      </div>
+      {img ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={img} alt={l.sku || ''} className={cx('w-11 h-11 rounded-xl object-cover border border-black/[0.06] shrink-0', cancelled && 'opacity-60 grayscale')} />
+      ) : (
+        <div className={cx(
+          'w-11 h-11 rounded-xl flex items-center justify-center text-[13px] font-bold shrink-0',
+          cancelled ? 'bg-rose-100 text-rose-500' : 'bg-indigo-50 text-indigo-600',
+        )}>
+          {(l.sku || '?').slice(0, 2).toUpperCase()}
+        </div>
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className={cx('font-semibold text-[13px] truncate', cancelled ? 'text-zinc-500 line-through' : 'text-zinc-900')}>{l.sku || '—'}</span>
