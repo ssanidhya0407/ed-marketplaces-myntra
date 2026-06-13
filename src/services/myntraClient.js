@@ -165,6 +165,24 @@ function fetchPacketById(packetId) {
   return myntraGet(`/partner/v4/packet/${encodeURIComponent(packetId)}`);
 }
 
+// Invoice details (JSON, not the PDF): GET /partner/v4/packet/:packetId/getInvoiceDetails/
+// Returns 2050 "Order is not marked RTD yet" until the packet has been dispatched.
+function fetchInvoiceDetails(packetId) {
+  return myntraGet(`/partner/v4/packet/${encodeURIComponent(packetId)}/getInvoiceDetails/`);
+}
+
+// Returns Recon: POST /partner/v4/returns/returnRecon. Same endpoint serves both a
+// date-range search and a single-return detail (just send { id }).
+function searchReturns({ startDate, endDate, destinationWarehouseIds, page = 0, returnType } = {}) {
+  return myntraSend('POST', '/partner/v4/returns/returnRecon', {
+    startDate, endDate, destinationWarehouseIds, page, returnType,
+  });
+}
+
+function fetchReturnDetails(id) {
+  return myntraSend('POST', '/partner/v4/returns/returnRecon', { id });
+}
+
 // ---- Documents (raw PDF) ----
 function fetchShippingLabel(packetId) {
   return myntraRaw(`/partner/v4/packet/${encodeURIComponent(packetId)}/shippingLabel/`);
@@ -208,15 +226,35 @@ function markReadyToDispatch({ warehouse, orderLineEntries = [] } = {}) {
   return myntraSend('PUT', '/partner/v4/order/readyToDispatch/', { warehouse, orderLineEntries });
 }
 
+// Update Inventory: PUT /partner/v4/inventory/update — array of up to 10 SKUs.
+// Each item: { quantity, sku, processingSla, store_code }. Returns 1001 on success.
+function updateInventory(items = []) {
+  if (!items.length) throw new AppError(2006, 'At least one inventory item is required');
+  if (items.length > 10) throw new AppError(2006, 'Max 10 SKUs per inventory update call');
+  return myntraSend('PUT', '/partner/v4/inventory/update', items);
+}
+
+// Search Inventory: POST /partner/v4/inventory/search — body is a raw array of SKU strings.
+// Returns { inventoryDetails:[{sku, stores:[{stores_code, inventoryCount}]}], failedEntries:[] }.
+function searchInventory(skus = []) {
+  if (!skus.length) throw new AppError(2006, 'At least one SKU is required');
+  return myntraSend('POST', '/partner/v4/inventory/search', skus);
+}
+
 module.exports = {
   generateToken,
   fetchOrderList,
   fetchOrderById,
   fetchPacketById,
+  fetchInvoiceDetails,
+  searchReturns,
+  fetchReturnDetails,
   fetchShippingLabel,
   fetchInvoice,
   updateOrderEvent,
   cancelOrderItems,
   markReadyToShip,
   markReadyToDispatch,
+  updateInventory,
+  searchInventory,
 };

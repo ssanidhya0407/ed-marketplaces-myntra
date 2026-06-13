@@ -36,14 +36,48 @@ export const api = {
   inboxReturns(): Promise<{ ok: boolean; totalCount: number; returns: any[] }> {
     return getJson('/orders/api/inbox/returns');
   },
+  inboxReturnDetail(id: string): Promise<{ ok: boolean; return: any; error?: string }> {
+    return getJson(`/orders/api/inbox/return/${encodeURIComponent(id)}`);
+  },
+  // Live return detail from Myntra (Returns Recon by id).
+  returnDetails(id: string): Promise<{ ok: boolean; httpStatus: number; statusCode: number | null; message: string | null; detail: any; error?: string }> {
+    return getJson(`/orders/api/return-details/${encodeURIComponent(id)}`);
+  },
   statusLabels() { return getJson('/orders/api/status-labels'); },
-  labelUrl(packetId: string) { return withKey(`/orders/api/label/${encodeURIComponent(packetId)}`); },
-  invoiceUrl(packetId: string) { return withKey(`/orders/api/invoice/${encodeURIComponent(packetId)}`); },
+  labelUrl(packetId: string, source: 'live' | 'inbox' = 'live') {
+    const base = source === 'inbox' ? '/orders/api/inbox/label' : '/orders/api/label';
+    return withKey(`${base}/${encodeURIComponent(packetId)}`);
+  },
+  invoiceUrl(packetId: string, source: 'live' | 'inbox' = 'live') {
+    const base = source === 'inbox' ? '/orders/api/inbox/invoice' : '/orders/api/invoice';
+    return withKey(`${base}/${encodeURIComponent(packetId)}`);
+  },
+  // Invoice details as JSON (live Myntra only). 2050 until the packet is RTD'd.
+  invoiceDetails(packetId: string): Promise<{ ok: boolean; httpStatus: number; statusCode: number | null; message: string | null; details: any; error?: string }> {
+    return getJson(`/orders/api/invoice-details/${encodeURIComponent(packetId)}`);
+  },
   async action(sellerOrderId: string, body: Record<string, unknown>): Promise<any> {
     const res = await fetch(withKey(`/orders/api/action/${encodeURIComponent(sellerOrderId)}`), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
     return { httpStatus: res.status, ...data };
+  },
+  async updateInventory(items: Array<{ sku: string; quantity: number | string; processingSla?: number | string; store_code: string }>): Promise<{ ok: boolean; submitted?: number; succeeded?: number; failed?: any[]; chunkErrors?: any[]; error?: string; httpStatus: number }> {
+    const res = await fetch(withKey('/orders/api/inventory/update'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { httpStatus: res.status, ...data };
+  },
+  async searchInventory(skus: string[]): Promise<{ ok: boolean; inventory?: Record<string, Array<{ store_code: string; count: number }>>; failed?: string[]; blocked?: string[]; error?: string; httpStatus: number }> {
+    const res = await fetch(withKey('/orders/api/inventory/search'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { httpStatus: res.status, ...data };
+  },
+  listSkus(): Promise<{ ok: boolean; skus?: string[]; error?: string }> {
+    return getJson('/orders/api/skus');
   },
 };

@@ -1,15 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   X, Package, MapPin, CreditCard, Calendar, Box, FileText, Download, Loader2, AlertTriangle, Truck,
-  Clock, ShieldCheck, RotateCcw,
+  Clock, ShieldCheck, RotateCcw, Receipt, User, Phone, Mail, Ban,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { formatINR, formatDate, cx } from '@/lib/utils';
 import { allowedActions, ACTION_META, isAwaitingRelease, type ActionKey } from '@/lib/status';
 import StatusBadge from './StatusBadge';
+import InvoiceDetails from './InvoiceDetails';
+import { skuImage } from '@/lib/skuImage';
 import { useNotifications } from './NotificationProvider';
 
 export default function OrderDetailModal({
@@ -20,14 +22,19 @@ export default function OrderDetailModal({
   const [busy, setBusy] = useState<ActionKey | null>(null);
   const { pushToast } = useNotifications();
 
-  // Ready-to-Dispatch form (PPMP: RTD requires seller invoice + tax — collection schema).
+  // Ready-to-Dispatch (Myntra-generated invoice: minimal body, no seller invoice fields).
   const [rtdOpen, setRtdOpen] = useState(false);
-  const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(''); // datetime-local value
   const [rtdSubmitting, setRtdSubmitting] = useState(false);
+  // Myntra returns the tracking number in the RTD response; keep it so Ready to Ship
+  // unlocks immediately even before the order re-fetch reflects it.
+  const [rtdTracking, setRtdTracking] = useState('');
   // Cancel form (in-modal reason input instead of a browser prompt).
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('Out of stock');
+  // Invoice details per packet — auto-loaded from live Myntra for dispatched packets.
+  type InvState = { loading: boolean; ok: boolean; message: string; data: any };
+  const [invByPacket, setInvByPacket] = useState<Record<string, InvState>>({});
+  const invStarted = useRef<Set<string>>(new Set());
 
   async function fetchDetail() {
     setLoading(true);
@@ -36,7 +43,43 @@ export default function OrderDetailModal({
     setLoading(false);
   }
 
-  useEffect(() => { fetchDetail(); /* eslint-disable-next-line */ }, [sellerOrderId]);
+  useEffect(() => {
+    invStarted.current = new Set();
+    setInvByPacket({});
+    fetchDetail();
+    /* eslint-disable-next-line */
+  }, [sellerOrderId]);
+
+  // Auto-load invoice details for every dispatched packet on this order (live only).
+  // Myntra has no invoice before RTD, so we only ask for PK/SH/DL packets.
+  useEffect(() => {
+    if (source !== 'live' || !detail || detail._error) return;
+    const dispatched = ['PK', 'SH', 'DL'];
+    const packets: string[] = Array.from(
+      new Set(
+        (detail.orderLineEntries || [])
+          .filter((l: any) => l.packetId && dispatched.includes(l.status_code))
+          .map((l: any) => String(l.packetId)),
+      ),
+    );
+    packets.forEach((pid) => {
+      if (invStarted.current.has(pid)) return;
+      invStarted.current.add(pid);
+      setInvByPacket((m) => ({ ...m, [pid]: { loading: true, ok: false, message: '', data: null } }));
+      api.invoiceDetails(pid)
+        .then((res) => setInvByPacket((m) => ({
+          ...m,
+          [pid]: {
+            loading: false,
+            ok: res.ok,
+            message: res.message || res.error || (res.ok ? '' : `HTTP ${res.httpStatus}${res.statusCode ? ', code ' + res.statusCode : ''}`),
+            data: res.details,
+          },
+        })))
+        .catch((e: any) => setInvByPacket((m) => ({ ...m, [pid]: { loading: false, ok: false, message: e.message, data: null } })));
+    });
+    /* eslint-disable-next-line */
+  }, [detail, source]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', h);
@@ -47,10 +90,11 @@ export default function OrderDetailModal({
   const lines: any[] = detail?.orderLineEntries || [];
   const headStatus = lines[0]?.status_code;
   const actions = allowedActions(headStatus);
+  const orderTotal = lines.reduce((s, l) => s + (Number(l.lineFinalAmount ?? l.mrp) || 0), 0);
   // Myntra assigns the tracking number at RTD; it arrives at the order top level
   // (e.g. "trackingNumber": "MYEC1105151644"), with a line-level fallback.
   const trackingNo: string =
-    detail?.trackingNumber || lines.find((l) => l.trackingNumber)?.trackingNumber || '';
+    detail?.trackingNumber || lines.find((l) => l.trackingNumber)?.trackingNumber || rtdTracking || '';
   const addr = detail && [detail.address, detail.locality, detail.city, detail.stateName || detail.state, detail.zipcode, detail.country].filter(Boolean).join(', ');
 
   async function runAction(action: ActionKey) {
@@ -72,7 +116,7 @@ export default function OrderDetailModal({
       body.trackingNo = trackingNo;
     }
     if (action === 'ready_to_dispatch') {
-      // RTD needs invoice + tax — handled by the dedicated form (openRtd/submitRtd).
+      // RTD is confirmed via a short review panel (openRtd/submitRtd).
       openRtd();
       return;
     }
@@ -98,49 +142,26 @@ export default function OrderDetailModal({
   }
 
   function openRtd() {
-    // default invoice date = now, as a datetime-local value
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    setInvoiceDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
-    setInvoiceNumber('');
     setRtdOpen(true);
   }
 
-  // datetime-local "yyyy-MM-ddTHH:mm" -> Myntra "dd-MM-yyyy HH:mm:ss"
-  function toMyntraDate(v: string): string {
-    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v);
-    if (!m) return v;
-    return `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}:00`;
-  }
-
   async function submitRtd() {
-    if (!invoiceNumber.trim()) { pushToast({ tone: 'err', title: 'Invoice number required', message: 'Enter your seller invoice number.' }); return; }
-    if (!invoiceDate) { pushToast({ tone: 'err', title: 'Invoice date required', message: 'Pick the invoice date.' }); return; }
     const warehouse = lines[0]?.warehouse || detail.warehouse;
-    const orderLineEntries = lines.map((l) => ({
-      sellerOrderId,
-      orderLineId: l.orderLineId,
-      invoiceNumber: invoiceNumber.trim(),
-      invoiceDate: toMyntraDate(invoiceDate),
-      unitTotalAmount: l.lineFinalAmount ?? l.mrp ?? undefined,
-      // carry the tax breakup Myntra already attached to the order line
-      taxEntries: Array.isArray(l.taxEntries)
-        ? l.taxEntries.map((t: any) => ({
-            taxType: t.taxType,
-            taxRate: t.taxRate,
-            unitTaxAmount: t.unitTaxAmount,
-            unitTaxableAmount: t.unitTaxableAmount,
-          }))
-        : undefined,
-    }));
+    // Myntra-generated invoice model: the RTD body only needs the order line refs —
+    // Myntra produces the invoice and assigns packet/courier/tracking on its side.
+    const orderLineEntries = lines.map((l) => ({ sellerOrderId, orderLineId: l.orderLineId }));
 
-    if (!window.confirm(`Mark order ${sellerOrderId} READY TO DISPATCH on the LIVE Myntra account?\n\nThis packs the order, files invoice ${invoiceNumber.trim()}, and generates the packet/label. It cannot be cancelled afterwards.`)) return;
+    if (!window.confirm(`Mark order ${sellerOrderId} READY TO DISPATCH on the LIVE Myntra account?\n\nThis packs the order and generates the packet, shipping label, and Myntra invoice. It cannot be cancelled afterwards.`)) return;
 
     setRtdSubmitting(true);
     try {
       const res = await api.action(sellerOrderId, { action: 'ready_to_dispatch', warehouse, orderLineEntries });
       if (res.ok) {
-        pushToast({ tone: 'ok', title: 'Ready to Dispatch done', message: `${res.message || 'Order packed'} (code ${res.statusCode ?? res.httpStatus})` });
+        // RTD returns packetId + courierCode + trackingNumber — keep the tracking
+        // number so Ready to Ship unlocks immediately, before the re-fetch lands.
+        const tn = res.raw?.trackingNumber || '';
+        if (tn) setRtdTracking(tn);
+        pushToast({ tone: 'ok', title: 'Ready to Dispatch done', message: `${res.message || 'Order packed'}${tn ? ` · tracking ${tn}` : ''} (code ${res.statusCode ?? res.httpStatus})` });
         setRtdOpen(false);
         await fetchDetail();
         onMutated?.();
@@ -151,6 +172,24 @@ export default function OrderDetailModal({
       pushToast({ tone: 'err', title: 'Network error', message: e.message });
     } finally {
       setRtdSubmitting(false);
+    }
+  }
+
+  async function refreshInvoice(packetId: string) {
+    setInvByPacket((m) => ({ ...m, [packetId]: { loading: true, ok: false, message: '', data: null } }));
+    try {
+      const res = await api.invoiceDetails(packetId);
+      setInvByPacket((m) => ({
+        ...m,
+        [packetId]: {
+          loading: false,
+          ok: res.ok,
+          message: res.message || res.error || (res.ok ? '' : `HTTP ${res.httpStatus}${res.statusCode ? ', code ' + res.statusCode : ''}`),
+          data: res.details,
+        },
+      }));
+    } catch (e: any) {
+      setInvByPacket((m) => ({ ...m, [packetId]: { loading: false, ok: false, message: e.message, data: null } }));
     }
   }
 
@@ -183,111 +222,115 @@ export default function OrderDetailModal({
       onClick={onClose}
     >
       <div
-        className="relative bg-white rounded-2xl w-full max-w-[820px] max-h-[90vh] overflow-y-auto shadow-2xl animate-modal-content"
+        className="relative bg-white rounded-2xl w-full max-w-[840px] max-h-[92vh] overflow-y-auto shadow-2xl animate-modal-content"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-black/[0.06] px-6 py-4 rounded-t-2xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
-              <Package size={18} className="text-indigo-600" />
+        <div className="sticky top-0 z-10 bg-white/90 backdrop-blur-md border-b border-black/[0.06] px-6 py-3.5 rounded-t-2xl flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm shrink-0">
+              <Package size={18} className="text-white" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-bold text-zinc-900">Order Details</h2>
+                <h2 className="text-[15px] font-bold text-zinc-900">Order details</h2>
                 {headStatus !== undefined && <StatusBadge code={headStatus} />}
+                {source === 'inbox' && <span className="text-[9px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5">INBOX</span>}
               </div>
-              <span className="text-[11px] font-mono text-zinc-400">{sellerOrderId}</span>
+              <span className="text-[11px] font-mono text-zinc-400 truncate block">{sellerOrderId}</span>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-zinc-50 hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-zinc-700 transition-colors">
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-zinc-50 hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-zinc-700 transition-colors shrink-0">
             <X size={16} />
           </button>
         </div>
 
         {loading && (
-          <div className="px-6 py-16 text-center text-zinc-400">
-            <Loader2 size={20} className="animate-spin inline mr-2" /> Loading from Myntra…
+          <div className="px-6 py-20 text-center text-zinc-400">
+            <Loader2 size={22} className="animate-spin inline mr-2" /> Loading from Myntra…
           </div>
         )}
         {!loading && detail?._error && (
-          <div className="px-6 py-10 text-center text-rose-600 text-sm">{detail._error}</div>
+          <div className="px-6 py-12 text-center text-rose-600 text-sm">{detail._error}</div>
         )}
 
         {!loading && detail && !detail._error && (
           <div className="px-6 py-5 space-y-6">
-            {/* Summary cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <InfoCard icon={Calendar} label="Ship By" value={formatDate(lines[0]?.shipByTime)} />
-              <InfoCard icon={CreditCard} label="Payment" value={(detail.paymentMethod || '—').toUpperCase()} highlight />
-              <InfoCard icon={Box} label="Items" value={String(lines.length)} />
-              <InfoCard icon={Truck} label="Warehouse" value={lines[0]?.warehouse || '—'} />
+            {/* Hero: total + key meta */}
+            <div className="rounded-2xl border border-black/[0.06] bg-gradient-to-br from-zinc-50 to-white p-4 flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Order total</div>
+                <div className="text-[26px] font-bold text-zinc-900 leading-tight tabular-nums">{formatINR(orderTotal)}</div>
+                <div className="text-[11px] text-zinc-400 mt-0.5">{lines.length} item{lines.length !== 1 ? 's' : ''}</div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Stat icon={CreditCard} label="Payment" value={(detail.paymentMethod || '—').toUpperCase()} />
+                <Stat icon={Calendar} label="Ship by" value={formatDate(lines[0]?.shipByTime) || '—'} />
+                <Stat icon={Truck} label="Warehouse" value={lines[0]?.warehouse || '—'} />
+                {trackingNo && <Stat icon={Truck} label="Tracking" value={trackingNo} />}
+              </div>
             </div>
 
             {/* Timeline */}
-            <Section title="Order Timeline" icon={Clock}>
-              <Timeline status={headStatus} placedDate={lines[0]?.shipByTime} />
+            <Section title="Order timeline" icon={Clock}>
+              <div className="rounded-2xl border border-black/[0.06] px-4 py-4">
+                <Timeline status={headStatus} placedDate={lines[0]?.shipByTime} />
+              </div>
             </Section>
 
-            {/* Customer */}
+            {/* Customer & shipping */}
             <Section title="Customer & shipping" icon={MapPin}>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <DetailRow label="Customer" value={detail.receiverName} />
-                <DetailRow label="Mobile" value={detail.mobile} />
-                <DetailRow label="Email" value={detail.email} />
+              <div className="rounded-2xl border border-black/[0.06] p-4 space-y-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Field icon={User} label="Customer" value={detail.receiverName} />
+                  <Field icon={Phone} label="Mobile" value={detail.mobile} />
+                  <Field icon={Mail} label="Email" value={detail.email} />
+                </div>
+                <div className="pt-3.5 border-t border-black/[0.05]">
+                  <div className="flex items-center gap-1 text-[9px] font-semibold text-zinc-400 uppercase tracking-wider"><MapPin size={10} /> Shipping address</div>
+                  <p className="text-[13px] text-zinc-700 mt-1 leading-relaxed">{addr || '—'}</p>
+                </div>
               </div>
-              <div className="mt-3"><DetailRow label="Address" value={addr} /></div>
             </Section>
 
             {/* Items */}
             <Section title={`Items (${lines.length})`} icon={Box}>
-              <div className="rounded-xl border border-black/[0.06] overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-zinc-50/80 text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">
-                    <tr>
-                      <th className="px-3 py-2 text-left">SKU</th>
-                      <th className="px-3 py-2 text-left">Line ID</th>
-                      <th className="px-3 py-2 text-right">Amount</th>
-                      <th className="px-3 py-2 text-left">Status</th>
-                      <th className="px-3 py-2 text-left">Packet</th>
-                      <th className="px-3 py-2 text-left">Documents</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-100">
-                    {lines.map((l) => (
-                      <tr key={l.orderLineId}>
-                        <td className="px-3 py-2">
-                          <div className="font-semibold text-zinc-800">{l.sku || '—'}</div>
-                          {l.cancellationReason && <div className="text-[10px] text-zinc-400 max-w-[180px] truncate" title={l.cancellationReason}>{l.cancellationReason}</div>}
-                        </td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-zinc-600">{l.orderLineId}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-zinc-900">{formatINR(l.lineFinalAmount ?? l.mrp)}</td>
-                        <td className="px-3 py-2"><StatusBadge code={l.status_code} /></td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-zinc-600">{l.packetId || '—'}</td>
-                        <td className="px-3 py-2">
-                          {l.packetId ? (
-                            <div className="flex gap-2">
-                              <a href={api.labelUrl(l.packetId)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
-                                <Download size={11} /> Label
-                              </a>
-                              <a href={api.invoiceUrl(l.packetId)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
-                                <FileText size={11} /> Invoice
-                              </a>
-                            </div>
-                          ) : <span className="text-[11px] text-zinc-400">no packet</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-2">
+                {lines.map((l) => <ItemRow key={l.orderLineId} l={l} source={source} />)}
               </div>
             </Section>
 
+            {/* Invoice details — auto-loaded from Myntra for dispatched packets */}
+            {source === 'live' && Object.keys(invByPacket).length > 0 && (
+              <Section title="Invoice details" icon={Receipt}>
+                <div className="space-y-3">
+                  {Object.entries(invByPacket).map(([pid, st]) => (
+                    <div key={pid} className="rounded-2xl border border-black/[0.06] bg-zinc-50/40 p-3">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <div className="text-[11px] text-zinc-500">Packet <span className="font-mono text-zinc-700">{pid}</span></div>
+                        <button onClick={() => refreshInvoice(pid)} disabled={st.loading}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-800 disabled:opacity-50">
+                          <RotateCcw size={11} className={st.loading ? 'animate-spin' : ''} /> Refresh
+                        </button>
+                      </div>
+                      {st.loading ? (
+                        <div className="flex items-center gap-2 text-[12px] text-zinc-500"><Loader2 size={13} className="animate-spin" /> Fetching from Myntra…</div>
+                      ) : !st.ok ? (
+                        <p className="text-[12px] text-amber-700">{st.message || 'Invoice details not available yet.'}</p>
+                      ) : (
+                        <InvoiceDetails data={st.data} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            )}
+
             {/* Cancel form */}
             {cancelOpen && (
-              <div className="bg-rose-50/40 border border-rose-200/60 rounded-xl p-4 space-y-3">
+              <div className="bg-rose-50/50 border border-rose-200/70 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-[12px] font-semibold text-rose-700 flex items-center gap-1.5"><X size={13} /> Cancel order — reason required</h4>
+                  <h4 className="text-[12px] font-semibold text-rose-700 flex items-center gap-1.5"><AlertTriangle size={13} /> Cancel order — reason required</h4>
                   <button onClick={() => setCancelOpen(false)} className="text-zinc-400 hover:text-zinc-700"><X size={14} /></button>
                 </div>
                 <input value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="e.g. Out of stock"
@@ -304,34 +347,22 @@ export default function OrderDetailModal({
 
             {/* Ready-to-Dispatch form (PPMP) */}
             {rtdOpen && (
-              <div className="bg-indigo-50/40 border border-indigo-200/60 rounded-xl p-4 space-y-3">
+              <div className="bg-indigo-50/50 border border-indigo-200/70 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-[12px] font-semibold text-indigo-700 flex items-center gap-1.5"><Truck size={13} /> Ready to Dispatch — pack &amp; file invoice</h4>
+                  <h4 className="text-[12px] font-semibold text-indigo-700 flex items-center gap-1.5"><Truck size={13} /> Ready to Dispatch — pack &amp; generate label</h4>
                   <button onClick={() => setRtdOpen(false)} className="text-zinc-400 hover:text-zinc-700"><X size={14} /></button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Seller invoice number *</label>
-                    <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-2026-00123"
-                      className="mt-1 w-full px-3 py-2 text-[12px] bg-white border border-black/[0.08] rounded-lg focus:border-indigo-400 outline-none font-mono" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Invoice date *</label>
-                    <input type="datetime-local" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)}
-                      className="mt-1 w-full px-3 py-2 text-[12px] bg-white border border-black/[0.08] rounded-lg focus:border-indigo-400 outline-none" />
-                  </div>
                 </div>
                 <div className="rounded-lg border border-black/[0.06] overflow-hidden bg-white">
                   <table className="w-full text-[11px]">
                     <thead className="bg-zinc-50 text-[9px] uppercase text-zinc-500">
-                      <tr><th className="px-2 py-1.5 text-left">SKU</th><th className="px-2 py-1.5 text-right">Unit total</th><th className="px-2 py-1.5 text-left">Tax</th></tr>
+                      <tr><th className="px-2.5 py-1.5 text-left">SKU</th><th className="px-2.5 py-1.5 text-right">Unit total</th><th className="px-2.5 py-1.5 text-left">Tax</th></tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
                       {lines.map((l) => (
                         <tr key={l.orderLineId}>
-                          <td className="px-2 py-1.5 font-semibold">{l.sku}</td>
-                          <td className="px-2 py-1.5 text-right">{formatINR(l.lineFinalAmount ?? l.mrp)}</td>
-                          <td className="px-2 py-1.5 text-zinc-500">
+                          <td className="px-2.5 py-1.5 font-semibold">{l.sku}</td>
+                          <td className="px-2.5 py-1.5 text-right tabular-nums">{formatINR(l.lineFinalAmount ?? l.mrp)}</td>
+                          <td className="px-2.5 py-1.5 text-zinc-500">
                             {Array.isArray(l.taxEntries) && l.taxEntries.length
                               ? l.taxEntries.map((t: any, i: number) => <span key={i}>{t.taxType} {t.taxRate}%{i < l.taxEntries.length - 1 ? ', ' : ''}</span>)
                               : <span className="text-zinc-400">none on order</span>}
@@ -341,7 +372,7 @@ export default function OrderDetailModal({
                     </tbody>
                   </table>
                 </div>
-                <p className="text-[10px] text-zinc-500">Amount &amp; tax are taken from the order as Myntra supplied it. RTD is irreversible — the order cannot be cancelled after this.</p>
+                <p className="text-[10px] text-zinc-500">Myntra generates the invoice for this account — no invoice number needed. Amount &amp; tax shown are as Myntra supplied them. RTD is irreversible — the order cannot be cancelled after this.</p>
                 <div className="flex items-center justify-end gap-2">
                   <button onClick={() => setRtdOpen(false)} disabled={rtdSubmitting} className="px-3 py-1.5 text-[11px] font-medium text-zinc-600 hover:text-zinc-900 disabled:opacity-50">Cancel</button>
                   <button onClick={submitRtd} disabled={rtdSubmitting}
@@ -356,7 +387,7 @@ export default function OrderDetailModal({
 
         {/* Footer actions */}
         {!loading && detail && !detail._error && (
-          <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-black/[0.06] px-6 py-4 rounded-b-2xl flex items-center justify-between gap-3 flex-wrap">
+          <div className="sticky bottom-0 bg-white/90 backdrop-blur-md border-t border-black/[0.06] px-6 py-3.5 rounded-b-2xl flex items-center justify-between gap-3 flex-wrap">
             <span className="text-[11px] text-zinc-400 flex items-center gap-1.5">
               <AlertTriangle size={12} /> Actions hit the live Myntra account and confirm first.
             </span>
@@ -364,7 +395,7 @@ export default function OrderDetailModal({
               {actions.length === 0 ? (
                 <span className="text-[12px] text-zinc-400">
                   {isAwaitingRelease(headStatus)
-                    ? 'Received — awaiting release to Work in Progress by Myntra. Ready to Dispatch unlocks then.'
+                    ? 'Received — awaiting release to Work in Progress by Myntra.'
                     : 'No further seller action for this status.'}
                 </span>
               ) : actions.map((a) => {
@@ -397,33 +428,90 @@ export default function OrderDetailModal({
   );
 }
 
-function InfoCard({ icon: Icon, label, value, highlight }: { icon: LucideIcon; label: string; value: string; highlight?: boolean }) {
+function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
-    <div className="bg-zinc-50/80 rounded-xl p-3 border border-black/[0.03]">
-      <div className="flex items-center gap-1.5 mb-1">
-        <Icon size={12} className="text-zinc-400" />
-        <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">{label}</span>
-      </div>
-      <p className={cx('text-[14px] font-semibold', highlight ? 'text-indigo-600' : 'text-zinc-800')}>{value}</p>
+    <div className="bg-white border border-black/[0.06] rounded-xl px-3 py-2 min-w-[104px]">
+      <div className="flex items-center gap-1 text-[9px] font-semibold text-zinc-400 uppercase tracking-wider"><Icon size={10} /> {label}</div>
+      <div className="text-[12px] font-semibold text-zinc-800 mt-0.5 truncate max-w-[160px]">{value}</div>
     </div>
   );
 }
+
 function Section({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-2.5">
         <Icon size={14} className="text-indigo-500" />
-        <h3 className="text-[12px] font-semibold text-zinc-900 uppercase tracking-wider">{title}</h3>
+        <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{title}</h3>
       </div>
       {children}
     </div>
   );
 }
-function DetailRow({ label, value }: { label: string; value?: string }) {
+
+function Field({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value?: string }) {
   return (
-    <div>
-      <span className="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">{label}</span>
-      <p className="text-[13px] text-zinc-700 mt-0.5">{value || '—'}</p>
+    <div className="min-w-0">
+      <div className="flex items-center gap-1 text-[9px] font-semibold text-zinc-400 uppercase tracking-wider"><Icon size={10} /> {label}</div>
+      <p className="text-[13px] text-zinc-800 font-medium mt-0.5 truncate">{value || '—'}</p>
+    </div>
+  );
+}
+
+function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
+  // Truly cancelled only if the line is IC or Myntra stamped cancelledOn. A bare
+  // cancellationReason with no cancelledOn is a *request* that was never actioned.
+  const cancelled = String(l.status_code || '').toUpperCase() === 'IC' || !!l.cancelledOn;
+  const discounted = l.mrp && l.lineFinalAmount && Number(l.mrp) !== Number(l.lineFinalAmount);
+  const img = l.imageUrl || l.image || skuImage(l.sku);
+  return (
+    <div className={cx(
+      'rounded-2xl border p-3 flex items-start gap-3 transition-colors',
+      cancelled ? 'border-rose-200/70 bg-rose-50/30' : 'border-black/[0.06] hover:border-black/[0.1]',
+    )}>
+      {img ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={img} alt={l.sku || ''} className={cx('w-11 h-11 rounded-xl object-cover border border-black/[0.06] shrink-0', cancelled && 'opacity-60 grayscale')} />
+      ) : (
+        <div className={cx(
+          'w-11 h-11 rounded-xl flex items-center justify-center text-[13px] font-bold shrink-0',
+          cancelled ? 'bg-rose-100 text-rose-500' : 'bg-indigo-50 text-indigo-600',
+        )}>
+          {(l.sku || '?').slice(0, 2).toUpperCase()}
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={cx('font-semibold text-[13px] truncate', cancelled ? 'text-zinc-500 line-through' : 'text-zinc-900')}>{l.sku || '—'}</span>
+          <StatusBadge code={l.status_code} />
+        </div>
+        <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+          Line {l.orderLineId}{l.packetId ? <> · Packet {l.packetId}</> : ''}
+        </div>
+        {l.cancellationReason && (
+          <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-rose-50 border border-rose-200/70 px-2.5 py-1.5">
+            <Ban size={13} className="text-rose-500 mt-px shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[9px] font-bold text-rose-700 uppercase tracking-wide">{cancelled ? 'Cancelled' : 'Cancellation requested'}</div>
+              <p className="text-[11px] text-rose-600 leading-snug">{l.cancellationReason}</p>
+            </div>
+          </div>
+        )}
+        {l.packetId ? (
+          <div className="flex gap-3 mt-2">
+            <a href={api.labelUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+              <Download size={11} /> Label
+            </a>
+            <a href={api.invoiceUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-800">
+              <FileText size={11} /> Invoice
+            </a>
+          </div>
+        ) : null}
+      </div>
+      <div className="text-right shrink-0">
+        <div className={cx('font-bold text-[14px] tabular-nums', cancelled ? 'text-zinc-400 line-through' : 'text-zinc-900')}>{formatINR(l.lineFinalAmount ?? l.mrp)}</div>
+        {discounted && <div className="text-[10px] text-zinc-400 line-through tabular-nums">{formatINR(l.mrp)}</div>}
+      </div>
     </div>
   );
 }
@@ -460,16 +548,16 @@ function buildTimeline(code: string | null | undefined): Step[] {
 function Timeline({ status, placedDate }: { status: string | null | undefined; placedDate?: string }) {
   const steps = buildTimeline(status);
   return (
-    <div className="flex items-center overflow-x-auto py-1">
+    <div className="flex items-start justify-between">
       {steps.map((step, idx) => {
         const StepIcon = step.icon;
         const isLast = idx === steps.length - 1;
         return (
-          <div key={step.key} className="flex items-center">
+          <div key={step.key} className="flex items-start flex-1 last:flex-none">
             <div className="flex flex-col items-center">
               <div
                 className={cx(
-                  'w-9 h-9 rounded-full flex items-center justify-center border-2 transition-colors',
+                  'w-10 h-10 rounded-full flex items-center justify-center border-2 transition-colors',
                   step.cancelled
                     ? 'bg-rose-50 border-rose-300 text-rose-500'
                     : step.done
@@ -477,14 +565,14 @@ function Timeline({ status, placedDate }: { status: string | null | undefined; p
                       : 'bg-zinc-50 border-zinc-200 text-zinc-300',
                 )}
               >
-                <StepIcon size={15} />
+                <StepIcon size={16} />
               </div>
               <span className={cx('text-[10px] font-medium mt-1.5 whitespace-nowrap', step.done ? 'text-zinc-700' : 'text-zinc-300')}>
                 {step.label}
               </span>
             </div>
             {!isLast && (
-              <div className={cx('w-12 h-0.5 mx-1 mt-[-16px] rounded-full', steps[idx + 1].done ? 'bg-emerald-300' : 'bg-zinc-200')} />
+              <div className={cx('flex-1 h-0.5 mt-5 mx-1 rounded-full', steps[idx + 1].done ? 'bg-emerald-300' : 'bg-zinc-200')} />
             )}
           </div>
         );

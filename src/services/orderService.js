@@ -117,7 +117,16 @@ function updateOrder({ params, body }) {
   const setStatus = (s) => { if (order.status !== s) { order.status = s; order.statusHistory.push(s); } };
   const ok = () => { db.markDirty(); return { code: 1008, overrideMessage: 'Order updated successfully', extraFields: serializeOrder(order) }; };
   const cancelLines = (entries) => {
-    for (const e of entries || []) { const line = order.lineMap.get(String(e.orderLineId)); if (line) { line.cancelled = true; if (e.cancellationReason || e.comment) line.cancellationReason = e.cancellationReason || e.comment; } }
+    for (const e of entries || []) {
+      const line = order.lineMap.get(String(e.orderLineId));
+      if (!line) continue;
+      line.cancelled = true;
+      if (e.cancellationReason || e.comment) line.cancellationReason = e.cancellationReason || e.comment;
+      if (e.cancellationCode != null) line.cancellationCode = e.cancellationCode;
+      // Stamp when it was cancelled — this is the authoritative "actually cancelled"
+      // signal the dashboard relies on (vs a bare reason that was never actioned).
+      line.cancelledOn = e.cancelledOn || body.eventTime || new Date().toISOString();
+    }
     if (order.lineMap.size && Array.from(order.lineMap.values()).every((l) => l.cancelled)) setStatus('CANCELLED');
   };
 
