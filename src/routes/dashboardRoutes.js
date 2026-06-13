@@ -211,6 +211,31 @@ router.post('/orders/api/action/:sellerOrderId', dashboardGate, async (req, res)
 
 router.get('/orders/api/status-labels', (_req, res) => res.json(STATUS_LABELS));
 
+// Dashboard overview stats. Uses getOrderList's totalCount per status (one light call
+// each, no detail fetches) + local inbox/returns counts.
+router.get('/orders/api/stats', dashboardGate, async (_req, res) => {
+  try {
+    const codes = ['RFR', 'WP', 'PK', 'SH', 'DL', 'IC'];
+    const counts = await Promise.all(codes.map((c) =>
+      myntraClient.fetchOrderList({ page: 0, statusCode: c })
+        .then((r) => [c, (r.body && r.body.totalCount) ?? 0])
+        .catch(() => [c, 0]),
+    ));
+    const byStatus = Object.fromEntries(counts);
+    const total = await myntraClient.fetchOrderList({ page: 0 })
+      .then((r) => (r.body && r.body.totalCount) ?? 0).catch(() => 0);
+    return res.json({
+      ok: true,
+      total,
+      byStatus,
+      inboxOrders: db.orders.size,
+      returns: db.returns.size,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // Update inventory on Myntra (the M-Direct panel is closed for OMS sellers, so this is
 // the in-OMS replacement). Myntra's API caps at 10 SKUs/call, so we chunk and aggregate.
 router.post('/orders/api/inventory/update', dashboardGate, async (req, res) => {

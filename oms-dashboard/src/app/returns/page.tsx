@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RotateCw, Undo2, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RotateCw, Undo2, Search, CheckCircle2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useReturnOrders } from '@/lib/useReturnOrders';
 import ReturnDetailModal from '@/components/ReturnDetailModal';
 import OrderDetailModal from '@/components/OrderDetailModal';
 import { formatDate } from '@/lib/utils';
@@ -42,6 +43,10 @@ export default function ReturnsPage() {
   const [q, setQ] = useState('');
   const [selectedReturn, setSelectedReturn] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
+  // Live reconciliation: Myntra's authoritative status per return (returnRecon by-id,
+  // keyed on tracking number). Catches Update-Return webhooks that may have been missed.
+  const liveCache = useRef<Record<string, { status: string | null; confirmed: boolean }>>({});
+  const [live, setLive] = useState<Record<string, { status: string | null; confirmed: boolean }>>({});
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -55,11 +60,33 @@ export default function ReturnsPage() {
 
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, [load]);
 
+  // Reconcile each return's status against Myntra (once per return id, cached).
+  useEffect(() => {
+    let cancelled = false;
+    const todo = returns.filter((r) => !(r.id in liveCache.current)).slice(0, 30);
+    if (!todo.length) return;
+    (async () => {
+      for (const r of todo) {
+        const key = String(r.trackingNumber || r.id || '');
+        try {
+          const res = key ? await api.returnDetails(key) : null;
+          liveCache.current[r.id] = res?.ok && res.detail
+            ? { status: res.detail.status ?? null, confirmed: !!res.detail.isReturnConfirmed }
+            : { status: null, confirmed: false };
+        } catch { liveCache.current[r.id] = { status: null, confirmed: false }; }
+      }
+      if (!cancelled) setLive({ ...liveCache.current });
+    })();
+    return () => { cancelled = true; };
+  }, [returns]);
+
   const counts = useMemo(() => ({
     all: returns.length,
     CUSTOMER_RETURN: returns.filter((r) => !isRTO(r.type)).length,
     COURIER_RETURN: returns.filter((r) => isRTO(r.type)).length,
   } as Record<string, number>), [returns]);
+
+  const products = useReturnOrders(returns);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -123,10 +150,10 @@ export default function ReturnsPage() {
           <table className="w-full text-sm">
             <thead className="bg-zinc-50/80 text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">
               <tr>
+                <th className="px-4 py-3 text-left">Product</th>
                 <th className="px-4 py-3 text-left">Return ID</th>
                 <th className="px-4 py-3 text-left">Type</th>
                 <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Seller Order</th>
                 <th className="px-4 py-3 text-left">Tracking</th>
                 <th className="px-4 py-3 text-left">Created</th>
                 <th className="px-4 py-3 text-left">Reason</th>
@@ -140,14 +167,27 @@ export default function ReturnsPage() {
               )}
               {filtered.map((r) => (
                 <tr key={r.id} onClick={() => setSelectedReturn(r.id)} className="hover:bg-rose-50/40 cursor-pointer transition-colors">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      {products[r.id]?.image
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={products[r.id]!.image as string} alt="" className="w-9 h-9 rounded-lg object-cover border border-zinc-200 shrink-0" />
+                        : <div className="w-9 h-9 rounded-lg bg-zinc-100 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">{(products[r.id]?.sku || '?').slice(0, 2).toUpperCase()}</div>}
+                      <span className="text-[12px] font-medium text-zinc-800 truncate max-w-[140px]">{products[r.id] === undefined ? <span className="text-zinc-300">…</span> : (products[r.id]?.sku || '—')}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 font-mono text-[11px] text-zinc-700">{r.id}</td>
                   <td className="px-4 py-3">
                     <span className={'text-[10px] font-semibold px-2 py-0.5 rounded-md border ' + (isRTO(r.type) ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200')}>
                       {isRTO(r.type) ? 'RTO' : 'Customer'}
                     </span>
                   </td>
-                  <td className="px-4 py-3"><span className={'text-[10px] font-semibold px-2 py-0.5 rounded-md border ' + statusTone(r.status)}>{r.status || '—'}</span></td>
-                  <td className="px-4 py-3 font-mono text-[11px] text-zinc-500">{r.sellerOrderId || '—'}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className={'text-[10px] font-semibold px-2 py-0.5 rounded-md border ' + statusTone(live[r.id]?.status || r.status)}>{live[r.id]?.status || r.status || '—'}</span>
+                      {live[r.id]?.confirmed && <CheckCircle2 size={12} className="text-emerald-500" aria-label="reconciled with Myntra" />}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 font-mono text-[11px] text-zinc-500">{r.trackingNumber || '—'}</td>
                   <td className="px-4 py-3 text-[11px] text-zinc-500">{r.createdOn ? formatDate(r.createdOn) : '—'}</td>
                   <td className="px-4 py-3 text-[12px] text-zinc-600 max-w-[240px] truncate" title={r.reason || ''}>{r.reason || '—'}</td>
@@ -166,7 +206,7 @@ export default function ReturnsPage() {
         />
       )}
       {selectedOrder && (
-        <OrderDetailModal sellerOrderId={selectedOrder} source="inbox" onClose={() => setSelectedOrder(null)} />
+        <OrderDetailModal sellerOrderId={selectedOrder} source="live" onClose={() => setSelectedOrder(null)} />
       )}
     </>
   );

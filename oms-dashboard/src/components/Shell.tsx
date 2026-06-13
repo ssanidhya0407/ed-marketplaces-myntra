@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes } from 'lucide-react';
+import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes, LayoutDashboard } from 'lucide-react';
 import { useNotifications } from './NotificationProvider';
 import { cx } from '@/lib/utils';
 
 const NAV = [
+  { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/orders', label: 'All Orders', icon: Package },
   { href: '/orders/new', label: 'New Orders', icon: Sparkles },
   { href: '/inbox', label: 'Inbox', icon: Inbox },
@@ -118,29 +119,38 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <div className="text-[10px] text-zinc-400 mt-1">EXPERIENCES.DIGITAL</div>
           </div>
         </div>
-        <nav className="flex flex-col gap-1">
+        <div className="px-3 mb-1.5 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Menu</div>
+        <nav className="flex flex-col gap-0.5">
           {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href;
+            const active = href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
             return (
               <Link
                 key={href}
                 href={href}
                 className={cx(
-                  'flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[14px] font-semibold transition-all',
+                  'relative flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13.5px] font-semibold transition-all',
                   active
                     ? 'bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-sm'
-                    : 'text-zinc-600 hover:bg-zinc-50',
+                    : 'text-zinc-600 hover:bg-zinc-100/70',
                 )}
               >
-                <Icon size={16} />
+                <Icon size={16} className={active ? 'text-white' : 'text-zinc-400'} />
                 {label}
               </Link>
             );
           })}
         </nav>
-        <div className="mt-auto px-2 text-[11px] text-zinc-400">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 align-middle" />
-          Live · api-integration.myntra.com
+        <div className="mt-auto">
+          <div className="rounded-xl border border-black/[0.06] bg-zinc-50/70 p-3">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              <span className="text-[11px] font-semibold text-zinc-700">Live · Myntra</span>
+            </div>
+            <div className="text-[10px] text-zinc-400 mt-1 truncate">EXPERIENCES.DIGITAL · K8MMD2GK</div>
+          </div>
         </div>
       </aside>
 

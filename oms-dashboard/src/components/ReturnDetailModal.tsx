@@ -1,24 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, Undo2, Loader2, RotateCcw, Truck, Package, Calendar, MapPin, Hash } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { X, Undo2, Loader2, Package, User, ArrowRight } from 'lucide-react';
 import { api } from '@/lib/api';
-import { formatDate } from '@/lib/utils';
-import InvoiceDetails from './InvoiceDetails';
+import { formatINR, formatDate } from '@/lib/utils';
+import { skuImage } from '@/lib/skuImage';
+import StatusBadge from './StatusBadge';
 
 const isRTO = (t: string | null | undefined) => String(t || '').toUpperCase() === 'COURIER_RETURN';
 
-function Section({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
-  return (
-    <div className="px-6 py-4 border-b border-black/[0.05]">
-      <div className="flex items-center gap-1.5 mb-3 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
-        <Icon size={13} className="text-zinc-400" /> {title}
-      </div>
-      {children}
-    </div>
-  );
-}
+interface OrderInfo { sku: string | null; amount: number | null; status: string | null; customer: string | null; city: string | null; none?: boolean }
 
 function Field({ label, value, mono }: { label: string; value: any; mono?: boolean }) {
   return (
@@ -35,22 +26,8 @@ export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: st
   const [ret, setRet] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [live, setLive] = useState<{ loading: boolean; ok: boolean; message: string; detail: any } | null>(null);
-
-  async function loadLive(entityId: string) {
-    setLive({ loading: true, ok: false, message: '', detail: null });
-    try {
-      const res = await api.returnDetails(entityId);
-      setLive({
-        loading: false,
-        ok: res.ok && !!res.detail,
-        message: res.message || res.error || (res.ok ? 'No matching return on Myntra.' : `HTTP ${res.httpStatus}${res.statusCode ? ', code ' + res.statusCode : ''}`),
-        detail: res.detail,
-      });
-    } catch (e: any) {
-      setLive({ loading: false, ok: false, message: e.message, detail: null });
-    }
-  }
+  const [live, setLive] = useState<any>(null);
+  const [order, setOrder] = useState<OrderInfo | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,13 +35,23 @@ export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: st
       setLoading(true); setError('');
       const res = await api.inboxReturnDetail(id);
       if (cancelled) return;
-      if (res.ok) {
-        setRet(res.return);
-        loadLive(res.return?.trackingNumber || id); // Myntra keys Returns Recon on the entity id
-      } else {
-        setError(res.error || 'Failed to load return');
+      if (!res.ok) { setError(res.error || 'Failed to load return'); setLoading(false); return; }
+      const r = res.return; setRet(r); setLoading(false);
+
+      // Live return record (Myntra keys returnRecon on the tracking number) — for the
+      // authoritative confirmed/delivered timestamps.
+      api.returnDetails(r.trackingNumber || id).then((lr) => { if (!cancelled) setLive(lr.ok ? lr.detail : null); }).catch(() => {});
+
+      // Embed the parent order's key parts: find the returned line.
+      if (r.sellerOrderId) {
+        api.orderDetail(r.sellerOrderId, 'live').then((od) => {
+          if (cancelled) return;
+          const d = od.detail; const lines: any[] = d?.orderLineEntries || [];
+          const line = lines.find((l) => String(l.orderLineId) === String(r.orderLineId)) || lines[0];
+          if (line) setOrder({ sku: line.sku ?? null, amount: line.lineFinalAmount ?? line.mrp ?? null, status: line.status_code ?? null, customer: d.receiverName ?? null, city: d.city ?? null });
+          else setOrder({ sku: null, amount: null, status: null, customer: d?.receiverName ?? null, city: d?.city ?? null, none: true });
+        }).catch(() => setOrder({ sku: null, amount: null, status: null, customer: null, city: null, none: true }));
       }
-      setLoading(false);
     })();
     return () => { cancelled = true; };
   }, [id]);
@@ -76,7 +63,9 @@ export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: st
     return () => { document.removeEventListener('keydown', h); document.body.style.overflow = ''; };
   }, [onClose]);
 
-  const history: string[] = Array.isArray(ret?.statusHistory) ? ret.statusHistory : (ret?.status ? [ret.status] : []);
+  const sku = order?.sku || ret?.items?.[0]?.sku || null;
+  const img = skuImage(sku);
+  const amount = order?.amount;
 
   return (
     <div
@@ -84,17 +73,17 @@ export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: st
       style={{ backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
       onClick={onClose}
     >
-      <div className="relative bg-white rounded-2xl w-full max-w-[760px] max-h-[90vh] overflow-y-auto shadow-2xl animate-modal-content"
+      <div className="relative bg-white rounded-2xl w-full max-w-[620px] max-h-[90vh] overflow-y-auto shadow-2xl animate-modal-content"
         onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-black/[0.06] px-6 py-4 rounded-t-2xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-rose-50 flex items-center justify-center">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-rose-50 flex items-center justify-center shrink-0">
               <Undo2 size={18} className="text-rose-500" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-bold text-zinc-900">Return Details</h2>
+                <h2 className="text-[15px] font-bold text-zinc-900">Return details</h2>
                 {ret?.type && (
                   <span className={'text-[10px] font-semibold px-2 py-0.5 rounded-md border ' + (isRTO(ret.type) ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200')}>
                     {isRTO(ret.type) ? 'RTO' : 'Customer'}
@@ -102,56 +91,59 @@ export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: st
                 )}
                 {ret?.status && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md border bg-zinc-100 text-zinc-600 border-zinc-200">{ret.status}</span>}
               </div>
-              <span className="text-[11px] font-mono text-zinc-400">{id}</span>
+              <span className="text-[11px] font-mono text-zinc-400 truncate block">{id}</span>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-zinc-50 hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-zinc-700 transition-colors">
+          <button onClick={onClose} className="w-8 h-8 rounded-xl bg-zinc-50 hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-zinc-700 transition-colors shrink-0">
             <X size={16} />
           </button>
         </div>
 
-        {loading && (
-          <div className="px-6 py-16 text-center text-zinc-400"><Loader2 size={20} className="animate-spin inline mr-2" /> Loading return…</div>
-        )}
+        {loading && <div className="px-6 py-16 text-center text-zinc-400"><Loader2 size={20} className="animate-spin inline mr-2" /> Loading return…</div>}
         {!loading && error && <div className="px-6 py-10 text-center text-rose-600 text-sm">{error}</div>}
 
         {!loading && ret && (
-          <>
-            {history.length > 0 && (
-              <Section title="Status timeline" icon={RotateCcw}>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {history.map((s, i) => (
-                    <span key={i} className="flex items-center gap-1.5">
-                      <span className={'text-[11px] font-semibold px-2.5 py-1 rounded-lg border ' + (i === history.length - 1 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-zinc-50 text-zinc-500 border-zinc-200')}>{s}</span>
-                      {i < history.length - 1 && <span className="text-zinc-300">→</span>}
-                    </span>
-                  ))}
+          <div className="px-6 py-5 space-y-5">
+            {/* Returned item — embedded order essentials */}
+            <div>
+              <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider"><Package size={13} className="text-zinc-400" /> Returned item</div>
+              <div className="rounded-2xl border border-black/[0.06] p-3 flex items-center gap-3">
+                {img
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={img} alt={sku || ''} className="w-12 h-12 rounded-xl object-cover border border-black/[0.06] shrink-0" />
+                  : <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 font-bold flex items-center justify-center text-[13px] shrink-0">{(sku || '?').slice(0, 2).toUpperCase()}</div>}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-zinc-900 text-[13px] truncate">{sku || '—'}</span>
+                    {order?.status && <StatusBadge code={order.status} />}
+                  </div>
+                  <div className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    {order?.customer && <span className="flex items-center gap-1"><User size={10} /> {order.customer}</span>}
+                    {order?.city && <span>· {order.city}</span>}
+                    <span className="font-mono text-zinc-400">· line {ret.orderLineId || '—'}</span>
+                  </div>
                 </div>
-              </Section>
-            )}
-
-            <Section title="Return summary" icon={Package}>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
-                <Field label="Return ID" value={ret.id} mono />
-                <Field label="Type" value={isRTO(ret.type) ? 'RTO (Courier)' : 'Customer return'} />
-                <Field label="Created on" value={ret.createdOn ? formatDate(ret.createdOn) : null} />
-                <div className="min-w-0">
-                  <div className="text-[9px] font-semibold text-zinc-400 uppercase tracking-wider">Seller order</div>
-                  {ret.sellerOrderId && onViewOrder ? (
-                    <button onClick={() => onViewOrder(ret.sellerOrderId)}
-                      className="text-[12px] font-mono font-medium text-indigo-600 hover:text-indigo-800 underline decoration-dotted break-all text-left"
-                      title="Open the parent order">
-                      {ret.sellerOrderId}
+                <div className="text-right shrink-0">
+                  {amount != null && <div className="font-bold text-zinc-900 text-[14px] tabular-nums">{formatINR(amount)}</div>}
+                  {onViewOrder && ret.sellerOrderId && (
+                    <button onClick={() => onViewOrder(ret.sellerOrderId)} className="mt-1 inline-flex items-center gap-0.5 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+                      Full order <ArrowRight size={11} />
                     </button>
-                  ) : (
-                    <div className="text-[12px] text-zinc-800 font-medium font-mono break-words">{ret.sellerOrderId || '—'}</div>
                   )}
                 </div>
-                <Field label="Order line" value={ret.orderLineId} mono />
-                <Field label="Myntra order" value={ret.orderId} mono />
+              </div>
+            </div>
+
+            {/* Return summary — important fields only */}
+            <div>
+              <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider"><Undo2 size={13} className="text-zinc-400" /> Return summary</div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                <Field label="Type" value={isRTO(ret.type) ? 'RTO (Courier)' : 'Customer return'} />
+                <Field label="Created on" value={ret.createdOn ? formatDate(ret.createdOn) : null} />
+                <Field label="Confirmed" value={live?.confirmedTime ? formatDate(live.confirmedTime) : null} />
+                <Field label="Delivered" value={live?.deliveredTime ? formatDate(live.deliveredTime) : null} />
                 <Field label="Tracking" value={ret.trackingNumber} mono />
                 <Field label="Return warehouse" value={ret.returnWarehouseCode} />
-                <Field label="Reason ID" value={ret.reasonId} />
               </div>
               {ret.reason && (
                 <div className="mt-3 rounded-lg bg-zinc-50 border border-black/[0.05] px-3 py-2">
@@ -159,45 +151,8 @@ export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: st
                   <div className="text-[12px] text-zinc-700">{ret.reason}</div>
                 </div>
               )}
-              {Array.isArray(ret.items) && ret.items.length > 0 && (
-                <div className="mt-3">
-                  <div className="text-[10px] font-semibold text-zinc-500 mb-1 flex items-center gap-1"><Hash size={11} /> Returned items</div>
-                  <div className="rounded-lg border border-black/[0.06] overflow-hidden bg-white">
-                    <table className="w-full text-[11px]">
-                      <thead className="bg-zinc-50 text-[9px] uppercase text-zinc-500">
-                        <tr><th className="px-2 py-1.5 text-left">SKU</th><th className="px-2 py-1.5 text-right">Qty</th><th className="px-2 py-1.5 text-left">Reason</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100">
-                        {ret.items.map((it: any, i: number) => (
-                          <tr key={i}>
-                            <td className="px-2 py-1.5 font-mono">{it.sku || '—'}</td>
-                            <td className="px-2 py-1.5 text-right">{it.quantity ?? '—'}</td>
-                            <td className="px-2 py-1.5 text-zinc-500">{it.reason || ret.reason || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </Section>
-
-            <Section title="Live details from Myntra" icon={Truck}>
-              {!live || live.loading ? (
-                <div className="flex items-center gap-2 text-[12px] text-zinc-500"><Loader2 size={13} className="animate-spin" /> Fetching from Myntra…</div>
-              ) : live.ok ? (
-                <InvoiceDetails data={live.detail} />
-              ) : (
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[12px] text-amber-700">{live.message}</p>
-                  <button onClick={() => loadLive(ret.trackingNumber || id)}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:text-rose-800 shrink-0">
-                    <RotateCcw size={11} /> Retry
-                  </button>
-                </div>
-              )}
-            </Section>
-          </>
+            </div>
+          </div>
         )}
       </div>
     </div>
