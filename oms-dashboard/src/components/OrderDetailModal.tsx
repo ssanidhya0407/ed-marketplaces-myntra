@@ -50,15 +50,15 @@ export default function OrderDetailModal({
     /* eslint-disable-next-line */
   }, [sellerOrderId]);
 
-  // Auto-load invoice details for every dispatched packet on this order (live only).
-  // Myntra has no invoice before RTD, so we only ask for PK/SH/DL packets.
+  // Auto-load invoice details for any packet on this order (live only). A packet only
+  // exists once the order was RTD'd, so it always has a label + invoice — including
+  // shipped, delivered, completed and cancelled-after-pack orders (which show the docs).
   useEffect(() => {
     if (source !== 'live' || !detail || detail._error) return;
-    const dispatched = ['PK', 'SH', 'DL'];
     const packets: string[] = Array.from(
       new Set(
         (detail.orderLineEntries || [])
-          .filter((l: any) => l.packetId && dispatched.includes(l.status_code))
+          .filter((l: any) => l.packetId)
           .map((l: any) => String(l.packetId)),
       ),
     );
@@ -341,8 +341,9 @@ export default function OrderDetailModal({
               </div>
             </Section>
 
-            {/* Shipment — only once the order is packed/shipped */}
-            {dispatched && (trackingNo || courier || packetId) && (
+            {/* Shipment — shown whenever a packet/tracking exists (packed → delivered,
+                completed, or cancelled-after-pack) */}
+            {(trackingNo || courier || packetId) && (
               <Section title="Shipment" icon={Truck}>
                 <div className="rounded-2xl border border-black/[0.06] p-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <Field icon={Truck} label="Courier" value={courier || undefined} />
