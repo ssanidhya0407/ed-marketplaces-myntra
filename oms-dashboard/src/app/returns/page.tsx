@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RotateCw, Undo2, Search, CheckCircle2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useReturnOrders } from '@/lib/useReturnOrders';
 import ReturnDetailModal from '@/components/ReturnDetailModal';
 import OrderDetailModal from '@/components/OrderDetailModal';
 import { formatDate } from '@/lib/utils';
@@ -85,6 +86,8 @@ export default function ReturnsPage() {
     COURIER_RETURN: returns.filter((r) => isRTO(r.type)).length,
   } as Record<string, number>), [returns]);
 
+  const products = useReturnOrders(returns);
+
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return returns.filter((r) => {
@@ -147,10 +150,10 @@ export default function ReturnsPage() {
           <table className="w-full text-sm">
             <thead className="bg-zinc-50/80 text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">
               <tr>
+                <th className="px-4 py-3 text-left">Product</th>
                 <th className="px-4 py-3 text-left">Return ID</th>
                 <th className="px-4 py-3 text-left">Type</th>
                 <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Seller Order</th>
                 <th className="px-4 py-3 text-left">Tracking</th>
                 <th className="px-4 py-3 text-left">Created</th>
                 <th className="px-4 py-3 text-left">Reason</th>
@@ -164,6 +167,15 @@ export default function ReturnsPage() {
               )}
               {filtered.map((r) => (
                 <tr key={r.id} onClick={() => setSelectedReturn(r.id)} className="hover:bg-rose-50/40 cursor-pointer transition-colors">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      {products[r.id]?.image
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={products[r.id]!.image as string} alt="" className="w-9 h-9 rounded-lg object-cover border border-zinc-200 shrink-0" />
+                        : <div className="w-9 h-9 rounded-lg bg-zinc-100 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">{(products[r.id]?.sku || '?').slice(0, 2).toUpperCase()}</div>}
+                      <span className="text-[12px] font-medium text-zinc-800 truncate max-w-[140px]">{products[r.id] === undefined ? <span className="text-zinc-300">…</span> : (products[r.id]?.sku || '—')}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 font-mono text-[11px] text-zinc-700">{r.id}</td>
                   <td className="px-4 py-3">
                     <span className={'text-[10px] font-semibold px-2 py-0.5 rounded-md border ' + (isRTO(r.type) ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200')}>
@@ -176,7 +188,6 @@ export default function ReturnsPage() {
                       {live[r.id]?.confirmed && <CheckCircle2 size={12} className="text-emerald-500" aria-label="reconciled with Myntra" />}
                     </div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[11px] text-zinc-500">{r.sellerOrderId || '—'}</td>
                   <td className="px-4 py-3 font-mono text-[11px] text-zinc-500">{r.trackingNumber || '—'}</td>
                   <td className="px-4 py-3 text-[11px] text-zinc-500">{r.createdOn ? formatDate(r.createdOn) : '—'}</td>
                   <td className="px-4 py-3 text-[12px] text-zinc-600 max-w-[240px] truncate" title={r.reason || ''}>{r.reason || '—'}</td>
