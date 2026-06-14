@@ -279,6 +279,47 @@ router.post('/orders/api/inventory/update', dashboardGate, async (req, res) => {
   }
 });
 
+// Override discounts on Myntra (PUT /partner/v4/discount/override), chunked to 100/call.
+// discount 0 removes the discount. Returns per-SKU status (e.g. "Invalid SKU").
+router.post('/orders/api/discount/override', dashboardGate, async (req, res) => {
+  try {
+    const { startDate, endDate, discountType = 'FlatPercent' } = req.body || {};
+    if (!startDate || !endDate) return res.status(400).json({ ok: false, error: 'Start and end date are required.' });
+    const items = (Array.isArray(req.body?.items) ? req.body.items : [])
+      .map((i) => ({ sku: String(i.sku ?? '').trim(), discount: Number(i.discount) }))
+      .filter((i) => i.sku);
+    if (!items.length) return res.status(400).json({ ok: false, error: 'No valid SKU rows provided.' });
+    const bad = items.find((i) => !Number.isFinite(i.discount) || i.discount < 0);
+    if (bad) return res.status(400).json({ ok: false, error: `Discount must be a non-negative number (check "${bad.sku}").` });
+
+    const results = [];
+    const chunkErrors = [];
+    for (let k = 0; k < items.length; k += 100) {
+      const chunk = items.slice(k, k + 100);
+      const r = await myntraClient.overrideDiscount({ startDate, endDate, discountType, discountEntries: chunk });
+      const body = r.body || {};
+      if (r.status !== 200 || body.statusType === 'ERROR') {
+        chunkErrors.push({ httpStatus: r.status, statusCode: body.statusCode ?? null, message: body.statusMessage || body.message || 'Failed', skus: chunk.map((c) => c.sku) });
+      } else if (Array.isArray(body.discountEntries)) {
+        results.push(...body.discountEntries);
+      } else {
+        results.push(...chunk.map((c) => ({ ...c, status: 'Processed' })));
+      }
+    }
+    const failed = results.filter((e) => e.status && /invalid|error|fail/i.test(String(e.status)));
+    const failedFromChunks = chunkErrors.flatMap((e) => e.skus);
+    return res.json({
+      ok: true,
+      submitted: items.length,
+      succeeded: items.length - failed.length - failedFromChunks.length,
+      results,
+      chunkErrors,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // Current inventory for given SKUs (Search Inventory), chunked to 10/call.
 // Returns sku -> [{ store_code, count }] plus any SKUs Myntra couldn't find.
 router.post('/orders/api/inventory/search', dashboardGate, async (req, res) => {

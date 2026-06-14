@@ -243,6 +243,15 @@ function searchInventory(skus = []) {
   return myntraSend('POST', '/partner/v4/inventory/search', skus);
 }
 
+// Discount Override: PUT /partner/v4/discount/override — set a FlatPercent/RupeeOff
+// discount per SKU for a date range (max 100 SKUs/call; discount 0 removes it).
+// Dates are "dd-MM-yyyy HH:mm:ss". Returns 2000 with per-SKU status in discountEntries.
+function overrideDiscount({ startDate, endDate, discountType = 'FlatPercent', discountEntries = [] } = {}) {
+  if (!discountEntries.length) throw new AppError(2006, 'At least one discount entry is required');
+  if (discountEntries.length > 100) throw new AppError(2006, 'Max 100 SKUs per discount call');
+  return myntraSend('PUT', '/partner/v4/discount/override', { startDate, endDate, discountType, discountEntries });
+}
+
 module.exports = {
   generateToken,
   fetchOrderList,
@@ -259,4 +268,5 @@ module.exports = {
   markReadyToDispatch,
   updateInventory,
   searchInventory,
+  overrideDiscount,
 };
