@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { RotateCw, X, Package, Sparkles, Boxes, Truck, Ban } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api, type OrderSummary } from '@/lib/api';
@@ -45,6 +46,13 @@ export default function AllOrdersPage() {
   // KPI counts come from the authoritative per-status totals (same source as Overview),
   // not from the loaded summary statuses — keeps the two strips consistent.
   const [kpi, setKpi] = useState<{ total: number; byStatus: Record<string, number> } | null>(null);
+  const router = useRouter();
+
+  // Deep-link: open with a status preselected via ?status=PK (from KPI cards elsewhere).
+  useEffect(() => {
+    const s = new URLSearchParams(window.location.search).get('status');
+    if (s) setStatus(s.toUpperCase());
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -92,14 +100,14 @@ export default function AllOrdersPage() {
         <p className="text-[13px] text-zinc-500 mt-0.5">Live order management · EXPERIENCES.DIGITAL on Myntra</p>
       </div>
 
-      {/* KPI strip — authoritative per-status counts (matches Overview) */}
+      {/* KPI strip — authoritative per-status counts (matches Overview). Click to filter. */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
-        <StatCard icon={Boxes} label="Total Orders" value={kpi?.total ?? 0} tone="indigo" loading={!kpi} />
-        <StatCard icon={Sparkles} label="New" value={by.RFR ?? 0} tone="blue" loading={!kpi} />
-        <StatCard icon={Package} label="In Progress" value={by.WP ?? 0} tone="amber" loading={!kpi} />
-        <StatCard icon={Boxes} label="Packed" value={by.PK ?? 0} tone="violet" loading={!kpi} />
-        <StatCard icon={Truck} label="Shipped" value={by.SH ?? 0} tone="emerald" loading={!kpi} />
-        <StatCard icon={Ban} label="Cancelled" value={by.IC ?? 0} tone="rose" loading={!kpi} />
+        <StatCard icon={Boxes} label="Total Orders" value={kpi?.total ?? 0} tone="indigo" loading={!kpi} onClick={() => setStatus('')} active={status === ''} />
+        <StatCard icon={Sparkles} label="New" value={by.RFR ?? 0} tone="blue" loading={!kpi} onClick={() => setStatus('RFR')} active={status === 'RFR'} />
+        <StatCard icon={Package} label="In Progress" value={by.WP ?? 0} tone="amber" loading={!kpi} onClick={() => router.push('/orders/new')} />
+        <StatCard icon={Boxes} label="Packed" value={by.PK ?? 0} tone="violet" loading={!kpi} onClick={() => setStatus('PK')} active={status === 'PK'} />
+        <StatCard icon={Truck} label="Shipped" value={by.SH ?? 0} tone="emerald" loading={!kpi} onClick={() => setStatus('SH')} active={status === 'SH'} />
+        <StatCard icon={Ban} label="Cancelled" value={by.IC ?? 0} tone="rose" loading={!kpi} onClick={() => setStatus('IC')} active={status === 'IC'} />
       </div>
 
       {/* Toolbar */}
@@ -168,9 +176,16 @@ const TONES: Record<string, string> = {
   rose: 'bg-rose-50 text-rose-600',
 };
 
-function StatCard({ icon: Icon, label, value, tone, loading }: { icon: LucideIcon; label: string; value: number; tone: string; loading: boolean }) {
+function StatCard({ icon: Icon, label, value, tone, loading, onClick, active }: { icon: LucideIcon; label: string; value: number; tone: string; loading: boolean; onClick?: () => void; active?: boolean }) {
   return (
-    <div className="bg-white border border-black/[0.06] rounded-2xl p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.06)] transition-shadow">
+    <div
+      onClick={onClick}
+      className={cx(
+        'bg-white border rounded-2xl p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all',
+        onClick && 'cursor-pointer hover:shadow-[0_6px_20px_rgba(0,0,0,0.08)] hover:border-black/[0.12]',
+        active ? 'border-indigo-300 ring-1 ring-indigo-200' : 'border-black/[0.06]',
+      )}
+    >
       <div className="flex items-center gap-2 mb-2">
         <div className={cx('w-7 h-7 rounded-lg flex items-center justify-center', TONES[tone])}>
           <Icon size={15} />

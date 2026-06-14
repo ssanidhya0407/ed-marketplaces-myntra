@@ -73,12 +73,12 @@ export default function OverviewPage() {
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <Kpi href="/orders" icon={ShoppingBag} label="Total orders" value={stats?.total} tone="zinc" loading={loading} />
-        <Kpi href="/orders/new" icon={Sparkles} label="New · awaiting" value={by.RFR} tone="blue" loading={loading} />
+        <Kpi href="/orders?status=RFR" icon={Sparkles} label="New · awaiting" value={by.RFR} tone="blue" loading={loading} />
         <Kpi href="/orders/new" icon={Package} label="In progress" value={by.WP} tone="amber" loading={loading} />
-        <Kpi href="/orders" icon={Boxes} label="Packed" value={by.PK} tone="violet" loading={loading} />
-        <Kpi href="/orders" icon={Truck} label="Shipped" value={by.SH} tone="emerald" loading={loading} />
-        <Kpi href="/orders" icon={CheckCircle2} label="Delivered" value={by.DL} tone="green" loading={loading} />
-        <Kpi href="/orders" icon={Ban} label="Cancelled" value={by.IC} tone="rose" loading={loading} />
+        <Kpi href="/orders?status=PK" icon={Boxes} label="Packed" value={by.PK} tone="violet" loading={loading} />
+        <Kpi href="/orders?status=SH" icon={Truck} label="Shipped" value={by.SH} tone="emerald" loading={loading} />
+        <Kpi href="/orders?status=DL" icon={CheckCircle2} label="Delivered" value={by.DL} tone="green" loading={loading} />
+        <Kpi href="/orders?status=IC" icon={Ban} label="Cancelled" value={by.IC} tone="rose" loading={loading} />
         <Kpi href="/returns" icon={Undo2} label="Returns" value={stats?.returns} tone="pink" loading={loading} />
       </div>
 
