@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { RotateCw, X, Package, Sparkles, Boxes, Truck, Ban } from 'lucide-react';
+import { RotateCw, X, Package, Boxes, Truck, Ban, CheckCircle2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api, type OrderSummary } from '@/lib/api';
 import { isNewStatus } from '@/lib/status';
@@ -12,15 +12,6 @@ import OrderDetailModal from '@/components/OrderDetailModal';
 import { cx } from '@/lib/utils';
 
 const PAGE_SIZE = 12;
-const TABS = [
-  { value: '', label: 'All' },
-  { value: 'RFR', label: 'New' },
-  { value: 'PK', label: 'Packed' },
-  { value: 'SH', label: 'Shipped' },
-  { value: 'DL', label: 'Delivered' },
-  { value: 'C', label: 'Completed' },
-  { value: 'IC', label: 'Cancelled' },
-];
 
 async function fetchAllPages(params: { startDate?: string; endDate?: string }): Promise<OrderSummary[]> {
   const first = await api.listOrders({ page: 0, ...params });
@@ -45,7 +36,7 @@ export default function AllOrdersPage() {
   const [selected, setSelected] = useState<string | null>(null);
   // KPI counts come from the authoritative per-status totals (same source as Overview),
   // not from the loaded summary statuses — keeps the two strips consistent.
-  const [kpi, setKpi] = useState<{ total: number; byStatus: Record<string, number> } | null>(null);
+  const [kpi, setKpi] = useState<{ total: number; byStatus: Record<string, number>; completed: number } | null>(null);
   const router = useRouter();
 
   // Deep-link: open with a status preselected via ?status=PK (from KPI cards elsewhere).
@@ -56,7 +47,7 @@ export default function AllOrdersPage() {
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
-    api.stats().then((s) => { if (s.ok) setKpi({ total: s.total, byStatus: s.byStatus }); }).catch(() => {});
+    api.stats().then((s) => { if (s.ok) setKpi({ total: s.total, byStatus: s.byStatus, completed: s.completed }); }).catch(() => {});
     try {
       if (from && to) {
         const days = (new Date(to).getTime() - new Date(from).getTime()) / 86400000;
@@ -95,36 +86,10 @@ export default function AllOrdersPage() {
 
   return (
     <>
-      <div className="mb-5">
-        <h1 className="text-[22px] font-bold text-zinc-900 tracking-tight">Orders</h1>
-        <p className="text-[13px] text-zinc-500 mt-0.5">Live order management · EXPERIENCES.DIGITAL on Myntra</p>
-      </div>
-
-      {/* KPI strip — authoritative per-status counts (matches Overview). Click to filter. */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
-        <StatCard icon={Boxes} label="Total Orders" value={kpi?.total ?? 0} tone="indigo" loading={!kpi} onClick={() => setStatus('')} active={status === ''} />
-        <StatCard icon={Sparkles} label="New" value={by.RFR ?? 0} tone="blue" loading={!kpi} onClick={() => setStatus('RFR')} active={status === 'RFR'} />
-        <StatCard icon={Package} label="In Progress" value={by.WP ?? 0} tone="amber" loading={!kpi} onClick={() => router.push('/orders/new')} />
-        <StatCard icon={Boxes} label="Packed" value={by.PK ?? 0} tone="violet" loading={!kpi} onClick={() => setStatus('PK')} active={status === 'PK'} />
-        <StatCard icon={Truck} label="Shipped" value={by.SH ?? 0} tone="emerald" loading={!kpi} onClick={() => setStatus('SH')} active={status === 'SH'} />
-        <StatCard icon={Ban} label="Cancelled" value={by.IC ?? 0} tone="rose" loading={!kpi} onClick={() => setStatus('IC')} active={status === 'IC'} />
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-        <div className="flex items-center gap-1 flex-wrap bg-white border border-black/[0.06] rounded-xl p-1 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          {TABS.map((t) => (
-            <button
-              key={t.value || 'all'}
-              onClick={() => setStatus(t.value)}
-              className={cx(
-                'px-3 py-1.5 text-[12px] font-semibold rounded-lg transition-all',
-                status === t.value
-                  ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm'
-                  : 'text-zinc-600 hover:bg-zinc-50',
-              )}
-            >{t.label}</button>
-          ))}
+      <div className="flex items-end justify-between flex-wrap gap-3 mb-5">
+        <div>
+          <h1 className="text-[22px] font-bold text-zinc-900 tracking-tight">Orders</h1>
+          <p className="text-[13px] text-zinc-500 mt-0.5">Live order management · EXPERIENCES.DIGITAL on Myntra</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
@@ -144,6 +109,16 @@ export default function AllOrdersPage() {
             <RotateCw size={13} /> Refresh
           </button>
         </div>
+      </div>
+
+      {/* KPI strip — authoritative per-status counts (matches Overview). Click to filter. */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
+        <StatCard icon={Boxes} label="Total Orders" value={kpi?.total ?? 0} tone="indigo" loading={!kpi} onClick={() => setStatus('')} active={status === ''} />
+        <StatCard icon={Package} label="In Progress" value={by.WP ?? 0} tone="amber" loading={!kpi} onClick={() => router.push('/orders/new')} />
+        <StatCard icon={Boxes} label="Packed" value={by.PK ?? 0} tone="violet" loading={!kpi} onClick={() => setStatus('PK')} active={status === 'PK'} />
+        <StatCard icon={Truck} label="Shipped" value={by.SH ?? 0} tone="emerald" loading={!kpi} onClick={() => setStatus('SH')} active={status === 'SH'} />
+        <StatCard icon={Ban} label="Cancelled" value={by.IC ?? 0} tone="rose" loading={!kpi} onClick={() => setStatus('IC')} active={status === 'IC'} />
+        <StatCard icon={CheckCircle2} label="Completed" value={kpi?.completed ?? 0} tone="emerald" loading={!kpi} onClick={() => setStatus('C')} active={status === 'C'} />
       </div>
 
       <div className="rounded-2xl bg-white border border-black/[0.06] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
