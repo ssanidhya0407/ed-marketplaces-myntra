@@ -17,6 +17,7 @@ const TABS = [
   { value: 'PK', label: 'Packed' },
   { value: 'SH', label: 'Shipped' },
   { value: 'DL', label: 'Delivered' },
+  { value: 'C', label: 'Completed' },
   { value: 'IC', label: 'Cancelled' },
 ];
 
@@ -72,6 +73,9 @@ export default function AllOrdersPage() {
   const filtered = useMemo(() => {
     if (!status) return allOrders;
     if (status === 'RFR') return allOrders.filter((o) => isNewStatus(o.orderLines?.[0]?.status));
+    // Completed/closed orders carry no summary status from getOrderList (it's blank),
+    // so treat blank-or-C as Completed.
+    if (status === 'C') return allOrders.filter((o) => { const s = (o.orderLines?.[0]?.status || '').toUpperCase(); return s === 'C' || s === ''; });
     return allOrders.filter((o) => (o.orderLines?.[0]?.status || '').toUpperCase() === status);
   }, [allOrders, status]);
 
