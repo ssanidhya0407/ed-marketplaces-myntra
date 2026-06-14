@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RotateCw, X, Package, Sparkles, Boxes, Truck, Ban } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api, type OrderSummary } from '@/lib/api';
-import { isNewStatus, statusInfo } from '@/lib/status';
+import { isNewStatus } from '@/lib/status';
 import { useRowDetails } from '@/lib/useRowDetails';
 import OrdersTable from '@/components/OrdersTable';
 import OrderDetailModal from '@/components/OrderDetailModal';
@@ -41,9 +41,13 @@ export default function AllOrdersPage() {
   const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
+  // KPI counts come from the authoritative per-status totals (same source as Overview),
+  // not from the loaded summary statuses — keeps the two strips consistent.
+  const [kpi, setKpi] = useState<{ total: number; byStatus: Record<string, number> } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
+    api.stats().then((s) => { if (s.ok) setKpi({ total: s.total, byStatus: s.byStatus }); }).catch(() => {});
     try {
       if (from && to) {
         const days = (new Date(to).getTime() - new Date(from).getTime()) / 86400000;
@@ -63,17 +67,7 @@ export default function AllOrdersPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const stats = useMemo(() => {
-    const s = { total: allOrders.length, new: 0, packed: 0, shipped: 0, cancelled: 0 };
-    for (const o of allOrders) {
-      const code = (o.orderLines?.[0]?.status || '').toUpperCase();
-      if (isNewStatus(o.orderLines?.[0]?.status)) s.new++;
-      else if (code === 'PK' || code === 'RTD' || code === 'WP') s.packed++;
-      else if (code === 'SH' || code === 'DL' || code === 'OFD') s.shipped++;
-      else if (code === 'IC' || code === 'RTO' || code === 'RT') s.cancelled++;
-    }
-    return s;
-  }, [allOrders]);
+  const by = kpi?.byStatus || {};
 
   const filtered = useMemo(() => {
     if (!status) return allOrders;
@@ -94,13 +88,14 @@ export default function AllOrdersPage() {
         <p className="text-[13px] text-zinc-500 mt-0.5">Live order management · EXPERIENCES.DIGITAL on Myntra</p>
       </div>
 
-      {/* KPI strip */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-        <StatCard icon={Boxes} label="Total Orders" value={stats.total} tone="indigo" loading={loading} />
-        <StatCard icon={Sparkles} label="New" value={stats.new} tone="blue" loading={loading} />
-        <StatCard icon={Package} label="Packed" value={stats.packed} tone="amber" loading={loading} />
-        <StatCard icon={Truck} label="Shipped" value={stats.shipped} tone="emerald" loading={loading} />
-        <StatCard icon={Ban} label="Cancelled" value={stats.cancelled} tone="rose" loading={loading} />
+      {/* KPI strip — authoritative per-status counts (matches Overview) */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
+        <StatCard icon={Boxes} label="Total Orders" value={kpi?.total ?? 0} tone="indigo" loading={!kpi} />
+        <StatCard icon={Sparkles} label="New" value={by.RFR ?? 0} tone="blue" loading={!kpi} />
+        <StatCard icon={Package} label="In Progress" value={by.WP ?? 0} tone="amber" loading={!kpi} />
+        <StatCard icon={Boxes} label="Packed" value={by.PK ?? 0} tone="violet" loading={!kpi} />
+        <StatCard icon={Truck} label="Shipped" value={by.SH ?? 0} tone="emerald" loading={!kpi} />
+        <StatCard icon={Ban} label="Cancelled" value={by.IC ?? 0} tone="rose" loading={!kpi} />
       </div>
 
       {/* Toolbar */}
@@ -164,6 +159,7 @@ const TONES: Record<string, string> = {
   indigo: 'bg-indigo-50 text-indigo-600',
   blue: 'bg-blue-50 text-blue-600',
   amber: 'bg-amber-50 text-amber-600',
+  violet: 'bg-violet-50 text-violet-600',
   emerald: 'bg-emerald-50 text-emerald-600',
   rose: 'bg-rose-50 text-rose-600',
 };
