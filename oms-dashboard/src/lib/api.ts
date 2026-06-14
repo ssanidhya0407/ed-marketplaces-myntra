@@ -83,4 +83,11 @@ export const api = {
   listSkus(): Promise<{ ok: boolean; skus?: string[]; error?: string }> {
     return getJson('/orders/api/skus');
   },
+  async overrideDiscount(payload: { startDate: string; endDate: string; discountType: string; items: Array<{ sku: string; discount: number | string }> }): Promise<{ ok: boolean; submitted?: number; succeeded?: number; results?: any[]; chunkErrors?: any[]; error?: string; httpStatus: number }> {
+    const res = await fetch(withKey('/orders/api/discount/override'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { httpStatus: res.status, ...data };
+  },
 };

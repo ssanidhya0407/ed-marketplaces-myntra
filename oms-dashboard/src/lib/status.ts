@@ -8,7 +8,9 @@ export const STATUS_MAP: Record<string, Tone> = {
   WP:  { label: 'In Progress', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
   PK:  { label: 'Packed', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
   SH:  { label: 'Shipped', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  S:   { label: 'Shipped', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }, // detail uses 'S'; list uses 'SH'
   DL:  { label: 'Delivered', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  D:   { label: 'Delivered', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   IC:  { label: 'Cancelled', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
   C:   { label: 'Completed', cls: 'bg-zinc-100 text-zinc-600 border-zinc-200' }, // undocumented, terminal
   // extra codes we may encounter
