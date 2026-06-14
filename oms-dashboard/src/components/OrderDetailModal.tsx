@@ -614,6 +614,16 @@ function buildTimeline(code: string | null | undefined): Step[] {
       { key: 'rto', label: 'Returned', icon: RotateCcw, done: true, cancelled: true },
     ];
   }
+  if (s === 'C') {
+    // Completed = the order ran the full course and is now closed.
+    return [
+      { key: 'placed', label: 'New', icon: Box, done: true },
+      { key: 'packed', label: 'Packed', icon: Package, done: true },
+      { key: 'shipped', label: 'Shipped', icon: Truck, done: true },
+      { key: 'delivered', label: 'Delivered', icon: ShieldCheck, done: true },
+      { key: 'completed', label: 'Completed', icon: CheckCircle2, done: true },
+    ];
+  }
   const packed = ['PK', 'RTD', 'RTS', 'SH', 'S', 'OFD', 'DL', 'D'].includes(s);
   const shipped = ['SH', 'S', 'OFD', 'DL', 'D'].includes(s);
   const delivered = s === 'DL' || s === 'D';
