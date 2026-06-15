@@ -442,31 +442,45 @@ router.get('/orders/api/report', dashboardGate, async (req, res) => {
     const hasStock = Object.keys(stock).length > 0;
     const skuAgg = {};
     for (const o of orders) {
+      const day = o.date ? o.date.slice(0, 10) : null;
       for (const l of o.lines) {
-        const s = skuAgg[l.sku] || (skuAgg[l.sku] = { sku: l.sku, category: l.category, units: 0, revenue: 0, gross: 0, tax: 0, settlement: 0, cancelledUnits: 0, returnedUnits: 0, orders: new Set() });
+        const s = skuAgg[l.sku] || (skuAgg[l.sku] = { sku: l.sku, category: l.category, units: 0, revenue: 0, gross: 0, tax: 0, settlement: 0, cancelledUnits: 0, returnedUnits: 0, orders: new Set(), saleDays: new Set() });
         s.gross += l.gross;
         if (l.cancelled) s.cancelledUnits += l.qty;
-        else { s.units += l.qty; s.revenue += l.gross; s.tax += l.tax; s.settlement += l.settlement; s.orders.add(o.sid); }
+        else { s.units += l.qty; s.revenue += l.gross; s.tax += l.tax; s.settlement += l.settlement; s.orders.add(o.sid); if (day) s.saleDays.add(day); }
       }
     }
     for (const r of returns) if (r.sku && skuAgg[r.sku]) skuAgg[r.sku].returnedUnits += 1;
 
-    const grossSales = orders.reduce((s, o) => s + sumBy(o, (l) => l.gross), 0);
+    // Mirrors dashboardweb: cancelled orders are excluded from the gross/order/unit
+    // cohort entirely (GMV = non-cancelled shipped value); returns are deducted to
+    // reach Net. Cancellations are surfaced separately as their own metric.
+    const totalOrdersAll = orders.length;
+    const cancelledOrders = orders.filter((o) => o.lines.length && o.lines.every((l) => l.cancelled)).length;
+    const ordersCount = totalOrdersAll - cancelledOrders; // non-cancelled order cohort
+    const grossSales = orders.reduce((s, o) => s + sumBy(o, (l) => l.gross, (l) => !l.cancelled), 0);
     const cancelledValue = orders.reduce((s, o) => s + sumBy(o, (l) => l.gross, (l) => l.cancelled), 0);
     const returnValue = returns.reduce((s, r) => s + (r.value || 0), 0);
     const taxCollected = orders.reduce((s, o) => s + sumBy(o, (l) => l.tax, (l) => !l.cancelled), 0);
     const sellerSettlement = orders.reduce((s, o) => s + sumBy(o, (l) => l.settlement, (l) => !l.cancelled), 0);
     const unitsSold = orders.reduce((s, o) => s + sumBy(o, (l) => l.qty, (l) => !l.cancelled), 0);
-    const netSales = grossSales - cancelledValue - returnValue;
-    const ordersCount = orders.length;
-    const cancelledOrders = orders.filter((o) => o.lines.length && o.lines.every((l) => l.cancelled)).length;
+    const netSales = grossSales - returnValue;
     const returnCount = returns.length;
     const totalCurrentStock = Object.values(stock).reduce((a, b) => a + b, 0);
     const totalRev = Object.values(skuAgg).reduce((a, s) => a + s.revenue, 0) || 1;
 
+    // dashboardweb fast/slow thresholds: 28 units / 30 days (~0.93/day) high,
+    // 10 units / 30 days (~0.33/day) low — compared against per-day velocity.
+    const HIGH_VELOCITY = 28 / 30;
+    const LOW_VELOCITY = 10 / 30;
     const bySku = Object.values(skuAgg).map((s) => {
-      const velocity = s.units / windowDays;
+      const velocity = s.units / windowDays; // units/day over the order window (for movers)
       const cur = stock[s.sku] != null ? stock[s.sku] : null;
+      // Days-of-inventory uses velocity over days WITH sales (dashboardweb), and the
+      // 9999 "never sells out" sentinel when there's stock but no recorded sales.
+      const saleVelocity = s.saleDays.size ? s.units / s.saleDays.size : 0;
+      let daysOfInventory = null;
+      if (cur != null) daysOfInventory = saleVelocity > 0 ? round(cur / saleVelocity, 1) : (cur > 0 ? 9999 : 0);
       return {
         sku: s.sku, category: s.category, units: s.units, orders: s.orders.size,
         revenue: round(s.revenue), tax: round(s.tax), settlement: round(s.settlement),
@@ -474,8 +488,8 @@ router.get('/orders/api/report', dashboardGate, async (req, res) => {
         contributionPct: round((s.revenue / totalRev) * 100, 1),
         cancelledUnits: s.cancelledUnits, returnedUnits: s.returnedUnits,
         returnRate: s.units ? round((s.returnedUnits / s.units) * 100, 1) : 0,
-        currentStock: cur, velocity: round(velocity, 2),
-        daysOfInventory: (cur != null && velocity > 0) ? round(cur / velocity, 1) : null,
+        currentStock: cur, velocity: round(velocity, 2), daysOfInventory,
+        movement: velocity >= HIGH_VELOCITY ? 'fast' : (s.units > 0 && velocity < LOW_VELOCITY ? 'slow' : 'medium'),
         sellThrough: (cur != null) ? round((s.units / ((s.units + cur) || 1)) * 100, 1) : null,
       };
     }).sort((a, b) => b.revenue - a.revenue).map((s, i) => ({ ...s, rank: i + 1 }));
@@ -532,14 +546,17 @@ router.get('/orders/api/report', dashboardGate, async (req, res) => {
     };
     const revenueByDay = bucket((d) => d.toISOString().slice(0, 10));
     const revenueByWeek = bucket(isoWeek);
+    // Growth %: ((curr − prev) / |prev|) × 100; prev == 0 → 100 if curr > 0 else 0 (dashboardweb).
+    const growth = (curr, prev) => (prev ? round(((curr - prev) / Math.abs(prev)) * 100, 1) : (curr > 0 ? 100 : 0));
     const revenueByMonth = bucket((d) => d.toISOString().slice(0, 7))
-      .map((b, i, arr) => ({ ...b, growthPct: (i > 0 && arr[i - 1].revenue) ? round(((b.revenue - arr[i - 1].revenue) / arr[i - 1].revenue) * 100, 1) : null }));
+      .map((b, i, arr) => ({ ...b, growthPct: i === 0 ? null : growth(b.revenue, arr[i - 1].revenue) }));
 
     const sold = bySku.filter((s) => s.units > 0);
     const topSkus = sold.slice(0, 10);
     const bottomSkus = [...sold].sort((a, b) => a.revenue - b.revenue).slice(0, 10);
-    const fastMoving = [...sold].sort((a, b) => b.velocity - a.velocity).slice(0, 10);
-    const slowMoving = [...sold].sort((a, b) => a.velocity - b.velocity).slice(0, 10);
+    // Fast/slow are threshold-based (velocity vs 0.93 / 0.33 units-per-day), like dashboardweb.
+    const fastMoving = sold.filter((s) => s.movement === 'fast').sort((a, b) => b.velocity - a.velocity);
+    const slowMoving = sold.filter((s) => s.movement === 'slow').sort((a, b) => a.velocity - b.velocity).slice(0, 12);
     const outOfStock = bySku.filter((s) => s.currentStock === 0);
 
     const orderRows = orders.map((o) => ({
@@ -561,9 +578,9 @@ router.get('/orders/api/report', dashboardGate, async (req, res) => {
       summary: {
         grossSales: round(grossSales), netSales: round(netSales), cancelledValue: round(cancelledValue),
         returnValue: round(returnValue), taxCollected: round(taxCollected), sellerSettlement: round(sellerSettlement),
-        ordersCount, unitsSold, aov: round(ordersCount ? netSales / ordersCount : 0),
+        ordersCount, unitsSold, aov: round(ordersCount ? grossSales / ordersCount : 0),
         itemsPerOrder: round(ordersCount ? unitsSold / ordersCount : 0, 2),
-        cancelledOrders, cancelRate: round(ordersCount ? (cancelledOrders / ordersCount) * 100 : 0, 1),
+        cancelledOrders, cancelRate: round(totalOrdersAll ? (cancelledOrders / totalOrdersAll) * 100 : 0, 1),
         returnCount, returnedUnits: returnCount, returnRate: round(unitsSold ? (returnCount / unitsSold) * 100 : 0, 1),
         totalCurrentStock: hasStock ? totalCurrentStock : null,
         outOfStockCount: hasStock ? outOfStock.length : null,
@@ -577,7 +594,9 @@ router.get('/orders/api/report', dashboardGate, async (req, res) => {
       topSkus, bottomSkus, fastMoving, slowMoving, outOfStock,
       returns, orders: orderRows,
       notes: [
+        `GMV, orders, units & AOV use the non-cancelled cohort (dashboardweb parity); ${cancelledOrders} cancelled order(s) worth ₹${round(cancelledValue).toLocaleString('en-IN')} are excluded and shown separately. Net = GMV − returns.`,
         'Order timestamps use Myntra’s ship-by time — the API returns no explicit order-creation field.',
+        'Fast/slow movers use velocity thresholds of 0.93 / 0.33 units-per-day; days-of-inventory uses velocity over days with sales.',
         hasStock
           ? 'Reserved stock isn’t exposed by Myntra’s inventory API, so “Available” equals current stock.'
           : 'Live inventory was unavailable for these SKUs (Myntra’s search returned none), so stock-based metrics are omitted.',

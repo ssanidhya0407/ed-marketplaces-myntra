@@ -12,6 +12,7 @@ export interface SkuRow {
   revenue: number; tax: number; settlement: number; avgPrice: number; contributionPct: number;
   cancelledUnits: number; returnedUnits: number; returnRate: number;
   currentStock: number | null; velocity: number; daysOfInventory: number | null; sellThrough: number | null;
+  movement: 'fast' | 'slow' | 'medium';
 }
 export interface CategoryRow {
   category: string; skus: number; units: number; revenue: number;
