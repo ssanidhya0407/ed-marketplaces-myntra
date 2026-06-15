@@ -6,6 +6,47 @@ export interface ListResponse {
   statusMessage?: string | null; error?: string; orders: OrderSummary[];
 }
 
+// ── 360° Sales Report ──
+export interface SkuRow {
+  sku: string; category: string; rank: number; units: number; orders: number;
+  revenue: number; tax: number; settlement: number; avgPrice: number; contributionPct: number;
+  cancelledUnits: number; returnedUnits: number; returnRate: number;
+  currentStock: number | null; velocity: number; daysOfInventory: number | null; sellThrough: number | null;
+}
+export interface CategoryRow {
+  category: string; skus: number; units: number; revenue: number;
+  contributionPct: number; returnedUnits: number; returnRate: number; currentStock: number;
+}
+export interface RegionRow { region: string; orders: number; units: number; revenue: number }
+export interface PaymentRow { method: string; orders: number; revenue: number }
+export interface StatusRow { status: string; orders: number; units: number; revenue: number }
+export interface SeriesPoint { key: string; revenue: number; orders: number; units: number; growthPct?: number | null }
+export interface ReturnRow {
+  id: string; sellerOrderId: string | null; sku: string | null; category: string | null;
+  value: number; type: string | null; reason: string | null; status: string | null; createdOn: string | null;
+}
+export interface OrderRow {
+  sellerOrderId: string; date: string | null; status: string; region: string;
+  city: string | null; payment: string; units: number; gross: number; net: number; skus: string;
+}
+export interface ReportSummary {
+  grossSales: number; netSales: number; cancelledValue: number; returnValue: number; taxCollected: number; sellerSettlement: number;
+  ordersCount: number; unitsSold: number; aov: number; itemsPerOrder: number;
+  cancelledOrders: number; cancelRate: number; returnCount: number; returnedUnits: number; returnRate: number;
+  totalCurrentStock: number | null; outOfStockCount: number | null; sellThroughRate: number | null;
+  inventoryTurnover: number | null; revenueGrowthPct: number | null; skuCount: number;
+}
+export interface SalesReport {
+  ok: boolean; cached?: boolean; error?: string;
+  generatedAt: string;
+  window: { from: string | null; to: string | null; days: number; hasDates: boolean };
+  summary: ReportSummary;
+  byStatus: StatusRow[]; bySku: SkuRow[]; byCategory: CategoryRow[]; byRegion: RegionRow[]; byPayment: PaymentRow[];
+  revenueByDay: SeriesPoint[]; revenueByWeek: SeriesPoint[]; revenueByMonth: SeriesPoint[];
+  topSkus: SkuRow[]; bottomSkus: SkuRow[]; fastMoving: SkuRow[]; slowMoving: SkuRow[]; outOfStock: SkuRow[];
+  returns: ReturnRow[]; orders: OrderRow[]; notes: string[];
+}
+
 const KEY = typeof window !== 'undefined' ? new URLSearchParams(location.search).get('key') : null;
 const withKey = (url: string) => (KEY ? url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(KEY) : url);
 
@@ -46,6 +87,9 @@ export const api = {
   statusLabels() { return getJson('/orders/api/status-labels'); },
   stats(): Promise<{ ok: boolean; total: number; byStatus: Record<string, number>; completed: number; inboxOrders: number; returns: number; error?: string }> {
     return getJson('/orders/api/stats');
+  },
+  report(refresh = false): Promise<SalesReport> {
+    return getJson('/orders/api/report' + (refresh ? '?refresh=1' : ''));
   },
   labelUrl(packetId: string, source: 'live' | 'inbox' = 'live') {
     const base = source === 'inbox' ? '/orders/api/inbox/label' : '/orders/api/label';

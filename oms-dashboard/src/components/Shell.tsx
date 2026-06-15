@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes, LayoutDashboard, Percent } from 'lucide-react';
+import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes, LayoutDashboard, Percent, BarChart3 } from 'lucide-react';
 import { useNotifications } from './NotificationProvider';
 import { cx } from '@/lib/utils';
 
@@ -15,6 +15,7 @@ const NAV = [
   { href: '/returns', label: 'Returns', icon: Undo2 },
   { href: '/inventory', label: 'Inventory', icon: Boxes },
   { href: '/discounts', label: 'Discounts', icon: Percent },
+  { href: '/reports', label: 'Reports', icon: BarChart3 },
 ];
 
 function NotificationBell() {
