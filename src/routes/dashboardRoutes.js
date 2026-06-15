@@ -48,6 +48,15 @@ const reconciled = (o, live, cached) => {
   return liveCode ? liveCode : cached;
 };
 
+// The Inbox only holds orders that are still in progress — newly pushed (RFR) or
+// accepted/awaiting dispatch (WP). The moment an order moves out of that state
+// (packed/shipped/delivered/cancelled/completed) it drops out of the Inbox.
+const IN_PROGRESS = new Set(['RFR', 'WP']);
+function isInboxInProgress(o, live) {
+  if (lines(o).some((l) => l.cancelled)) return false;
+  return IN_PROGRESS.has(reconciled(o, live, INTERNAL_TO_CODE[o.status] || o.status));
+}
+
 function inboxSummary(o, live) {
   return {
     orderId: o.sellerOrderId,
@@ -259,12 +268,19 @@ router.get('/orders/api/stats', dashboardGate, async (_req, res) => {
     // Myntra's list filter doesn't accept 'C', so derive Completed/closed as the
     // remainder (these come back with a blank summary status from getOrderList).
     const counted = Object.values(byStatus).reduce((a, b) => a + (b || 0), 0);
+    // Inbox count mirrors the list: only orders still in progress.
+    let live = new Map();
+    try { live = await liveStatusMap(); } catch { /* fall back to cached status */ }
+    let inboxOrders = 0;
+    for (const o of db.orders.values()) {
+      if (isPush(o) && isInboxInProgress(o, live)) inboxOrders += 1;
+    }
     return res.json({
       ok: true,
       total,
       byStatus,
       completed: Math.max(0, total - counted),
-      inboxOrders: db.orders.size,
+      inboxOrders,
       returns: db.returns.size,
     });
   } catch (error) {
@@ -421,6 +437,8 @@ router.get('/orders/api/inbox/list', dashboardGate, async (req, res) => {
   const orders = [];
   for (const o of db.orders.values()) {
     if (!isPush(o)) continue;
+    // Only keep orders that are still in progress; clear the rest from the Inbox.
+    if (!isInboxInProgress(o, live)) continue;
     const s = inboxSummary(o, live);
     if (wanted && s.orderLines[0] && s.orderLines[0].status !== wanted) continue;
     orders.push(s);
