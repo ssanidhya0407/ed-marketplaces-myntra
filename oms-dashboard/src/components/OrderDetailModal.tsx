@@ -546,15 +546,15 @@ function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
   const img = l.imageUrl || l.image || skuImage(l.sku);
   return (
     <div className={cx(
-      'rounded-2xl border p-3 flex items-start gap-3 transition-colors',
+      'rounded-2xl border p-3.5 flex items-start gap-3.5 transition-colors',
       cancelled ? 'border-rose-200/70 bg-rose-50/30' : 'border-black/[0.06] hover:border-black/[0.1]',
     )}>
       {img ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={img} alt={l.sku || ''} className={cx('w-11 h-11 rounded-xl object-cover border border-black/[0.06] shrink-0', cancelled && 'opacity-60 grayscale')} />
+        <img src={img} alt={l.sku || ''} className={cx('w-16 h-16 rounded-xl object-cover border border-black/[0.06] shrink-0', cancelled && 'opacity-60 grayscale')} />
       ) : (
         <div className={cx(
-          'w-11 h-11 rounded-xl flex items-center justify-center text-[13px] font-bold shrink-0',
+          'w-16 h-16 rounded-xl flex items-center justify-center text-[16px] font-bold shrink-0',
           cancelled ? 'bg-rose-100 text-rose-500' : 'bg-indigo-50 text-indigo-600',
         )}>
           {(l.sku || '?').slice(0, 2).toUpperCase()}
@@ -562,35 +562,35 @@ function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={cx('font-semibold text-[13px] truncate', cancelled ? 'text-zinc-500 line-through' : 'text-zinc-900')}>{l.sku || '—'}</span>
+          <span className={cx('font-semibold text-[15px] truncate', cancelled ? 'text-zinc-500 line-through' : 'text-zinc-900')}>{l.sku || '—'}</span>
           <StatusBadge code={l.status_code} />
         </div>
-        <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+        <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
           Line {l.orderLineId}{l.packetId ? <> · Packet {l.packetId}</> : ''}
         </div>
         {l.cancellationReason && (
           <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-rose-50 border border-rose-200/70 px-2.5 py-1.5">
             <Ban size={13} className="text-rose-500 mt-px shrink-0" />
             <div className="min-w-0">
-              <div className="text-[9px] font-bold text-rose-700 uppercase tracking-wide">{cancelled ? 'Cancelled' : 'Cancellation requested'}</div>
-              <p className="text-[11px] text-rose-600 leading-snug">{l.cancellationReason}</p>
+              <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wide">{cancelled ? 'Cancelled' : 'Cancellation requested'}</div>
+              <p className="text-[12px] text-rose-600 leading-snug">{l.cancellationReason}</p>
             </div>
           </div>
         )}
         {l.packetId ? (
           <div className="flex gap-3 mt-2">
-            <a href={api.labelUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
-              <Download size={11} /> Label
+            <a href={api.labelUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] font-semibold text-indigo-600 hover:text-indigo-800">
+              <Download size={13} /> Label
             </a>
-            <a href={api.invoiceUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-600 hover:text-violet-800">
-              <FileText size={11} /> Invoice
+            <a href={api.invoiceUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] font-semibold text-violet-600 hover:text-violet-800">
+              <FileText size={13} /> Invoice
             </a>
           </div>
         ) : null}
       </div>
       <div className="text-right shrink-0">
-        <div className={cx('font-bold text-[14px] tabular-nums', cancelled ? 'text-zinc-400 line-through' : 'text-zinc-900')}>{formatINR(l.lineFinalAmount ?? l.mrp)}</div>
-        {discounted && <div className="text-[10px] text-zinc-400 line-through tabular-nums">{formatINR(l.mrp)}</div>}
+        <div className={cx('font-bold text-[16px] tabular-nums', cancelled ? 'text-zinc-400 line-through' : 'text-zinc-900')}>{formatINR(l.lineFinalAmount ?? l.mrp)}</div>
+        {discounted && <div className="text-[11px] text-zinc-400 line-through tabular-nums">{formatINR(l.mrp)}</div>}
       </div>
     </div>
   );

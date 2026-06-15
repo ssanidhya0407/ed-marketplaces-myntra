@@ -145,23 +145,23 @@ export default function InventoryPage() {
                   <div className="flex items-center gap-2">
                     {skuImage(row.sku)
                       // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={skuImage(row.sku) as string} alt="" className="w-8 h-8 rounded-md object-cover border border-black/[0.06] shrink-0" />
-                      : <div className="w-8 h-8 rounded-md bg-zinc-100 shrink-0" />}
+                      ? <img src={skuImage(row.sku) as string} alt="" className="w-12 h-12 rounded-lg object-cover border border-black/[0.06] shrink-0" />
+                      : <div className="w-12 h-12 rounded-lg bg-zinc-100 shrink-0" />}
                     <input value={row.sku} onChange={(e) => update(i, 'sku', e.target.value)} placeholder="e.g. 8903880486532"
-                      className="w-full px-2.5 py-1.5 text-[12px] font-mono bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
+                      className="w-full px-2.5 py-2.5 text-[13px] font-mono bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
                   </div>
                 </td>
                 <td className="px-4 py-2">
                   <input value={row.quantity} onChange={(e) => update(i, 'quantity', e.target.value)} type="number" min={0} placeholder="0"
-                    className="w-full px-2.5 py-1.5 text-[12px] bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
+                    className="w-full px-2.5 py-2.5 text-[13px] bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
                 </td>
                 <td className="px-4 py-2">
                   <input value={row.processingSla} onChange={(e) => update(i, 'processingSla', e.target.value)} type="number" min={0}
-                    className="w-full px-2.5 py-1.5 text-[12px] bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
+                    className="w-full px-2.5 py-2.5 text-[13px] bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
                 </td>
                 <td className="px-4 py-2">
                   <input value={row.store_code} onChange={(e) => update(i, 'store_code', e.target.value)} placeholder="84502"
-                    className="w-full px-2.5 py-1.5 text-[12px] font-mono bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
+                    className="w-full px-2.5 py-2.5 text-[13px] font-mono bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
                 </td>
                 <td className="px-4 py-2 text-center">
                   <button onClick={() => removeRow(i)} className="text-zinc-300 hover:text-rose-500 transition-colors"><Trash2 size={14} /></button>

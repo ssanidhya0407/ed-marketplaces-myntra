@@ -107,26 +107,26 @@ export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: st
             {/* Returned item — embedded order essentials */}
             <div>
               <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider"><Package size={13} className="text-zinc-400" /> Returned item</div>
-              <div className="rounded-2xl border border-black/[0.06] p-3 flex items-center gap-3">
+              <div className="rounded-2xl border border-black/[0.06] p-3.5 flex items-center gap-3.5">
                 {img
                   // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={img} alt={sku || ''} className="w-12 h-12 rounded-xl object-cover border border-black/[0.06] shrink-0" />
-                  : <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 font-bold flex items-center justify-center text-[13px] shrink-0">{(sku || '?').slice(0, 2).toUpperCase()}</div>}
+                  ? <img src={img} alt={sku || ''} className="w-16 h-16 rounded-xl object-cover border border-black/[0.06] shrink-0" />
+                  : <div className="w-16 h-16 rounded-xl bg-indigo-50 text-indigo-600 font-bold flex items-center justify-center text-[16px] shrink-0">{(sku || '?').slice(0, 2).toUpperCase()}</div>}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-zinc-900 text-[13px] truncate">{sku || '—'}</span>
+                    <span className="font-semibold text-zinc-900 text-[15px] truncate">{sku || '—'}</span>
                     {order?.status && <StatusBadge code={order.status} />}
                   </div>
-                  <div className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                  <div className="text-[12px] text-zinc-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                     {order?.customer && <span className="flex items-center gap-1"><User size={10} /> {order.customer}</span>}
                     {order?.city && <span>· {order.city}</span>}
                     <span className="font-mono text-zinc-400">· line {ret.orderLineId || '—'}</span>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  {amount != null && <div className="font-bold text-zinc-900 text-[14px] tabular-nums">{formatINR(amount)}</div>}
+                  {amount != null && <div className="font-bold text-zinc-900 text-[16px] tabular-nums">{formatINR(amount)}</div>}
                   {onViewOrder && ret.sellerOrderId && (
-                    <button onClick={() => onViewOrder(ret.sellerOrderId)} className="mt-1 inline-flex items-center gap-0.5 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+                    <button onClick={() => onViewOrder(ret.sellerOrderId)} className="mt-1 inline-flex items-center gap-0.5 text-[12px] font-semibold text-indigo-600 hover:text-indigo-800">
                       Full order <ArrowRight size={11} />
                     </button>
                   )}

@@ -224,10 +224,14 @@ router.get('/orders/api/stats', dashboardGate, async (_req, res) => {
     const byStatus = Object.fromEntries(counts);
     const total = await myntraClient.fetchOrderList({ page: 0 })
       .then((r) => (r.body && r.body.totalCount) ?? 0).catch(() => 0);
+    // Myntra's list filter doesn't accept 'C', so derive Completed/closed as the
+    // remainder (these come back with a blank summary status from getOrderList).
+    const counted = Object.values(byStatus).reduce((a, b) => a + (b || 0), 0);
     return res.json({
       ok: true,
       total,
       byStatus,
+      completed: Math.max(0, total - counted),
       inboxOrders: db.orders.size,
       returns: db.returns.size,
     });

@@ -44,7 +44,7 @@ export const api = {
     return getJson(`/orders/api/return-details/${encodeURIComponent(id)}`);
   },
   statusLabels() { return getJson('/orders/api/status-labels'); },
-  stats(): Promise<{ ok: boolean; total: number; byStatus: Record<string, number>; inboxOrders: number; returns: number; error?: string }> {
+  stats(): Promise<{ ok: boolean; total: number; byStatus: Record<string, number>; completed: number; inboxOrders: number; returns: number; error?: string }> {
     return getJson('/orders/api/stats');
   },
   labelUrl(packetId: string, source: 'live' | 'inbox' = 'live') {

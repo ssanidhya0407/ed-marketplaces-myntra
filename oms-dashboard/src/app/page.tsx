@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  RotateCw, Package, Sparkles, Truck, CheckCircle2, Ban, Undo2, Boxes, Inbox as InboxIcon,
-  ArrowRight, AlertTriangle, ShoppingBag, Loader2,
+  RotateCw, Package, Truck, CheckCircle2, Ban, Undo2, Boxes, Inbox as InboxIcon,
+  ArrowRight, AlertTriangle, ShoppingBag, Loader2, Archive,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api, type OrderSummary } from '@/lib/api';
@@ -13,7 +13,7 @@ import OrdersTable from '@/components/OrdersTable';
 import OrderDetailModal from '@/components/OrderDetailModal';
 import { cx } from '@/lib/utils';
 
-interface Stats { total: number; byStatus: Record<string, number>; inboxOrders: number; returns: number }
+interface Stats { total: number; byStatus: Record<string, number>; completed: number; inboxOrders: number; returns: number }
 
 export default function OverviewPage() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -29,7 +29,7 @@ export default function OverviewPage() {
     try {
       const [s, list] = await Promise.all([api.stats(), api.listOrders({ page: 0 })]);
       if (!s.ok) { setError(s.error || 'Failed to load stats'); }
-      else setStats({ total: s.total, byStatus: s.byStatus, inboxOrders: s.inboxOrders, returns: s.returns });
+      else setStats({ total: s.total, byStatus: s.byStatus, completed: s.completed, inboxOrders: s.inboxOrders, returns: s.returns });
       setRecent((list.orders || []).slice(0, 8));
       setLastSync(new Date());
     } catch (e: any) { setError(e.message); }
@@ -73,12 +73,12 @@ export default function OverviewPage() {
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <Kpi href="/orders" icon={ShoppingBag} label="Total orders" value={stats?.total} tone="zinc" loading={loading} />
-        <Kpi href="/orders/new" icon={Sparkles} label="New · awaiting" value={by.RFR} tone="blue" loading={loading} />
         <Kpi href="/orders/new" icon={Package} label="In progress" value={by.WP} tone="amber" loading={loading} />
-        <Kpi href="/orders" icon={Boxes} label="Packed" value={by.PK} tone="violet" loading={loading} />
-        <Kpi href="/orders" icon={Truck} label="Shipped" value={by.SH} tone="emerald" loading={loading} />
-        <Kpi href="/orders" icon={CheckCircle2} label="Delivered" value={by.DL} tone="green" loading={loading} />
-        <Kpi href="/orders" icon={Ban} label="Cancelled" value={by.IC} tone="rose" loading={loading} />
+        <Kpi href="/orders?status=PK" icon={Boxes} label="Packed" value={by.PK} tone="violet" loading={loading} />
+        <Kpi href="/orders?status=SH" icon={Truck} label="Shipped" value={by.SH} tone="emerald" loading={loading} />
+        <Kpi href="/orders?status=DL" icon={CheckCircle2} label="Delivered" value={by.DL} tone="green" loading={loading} />
+        <Kpi href="/orders?status=C" icon={Archive} label="Completed" value={stats?.completed} tone="emerald" loading={loading} />
+        <Kpi href="/orders?status=IC" icon={Ban} label="Cancelled" value={by.IC} tone="rose" loading={loading} />
         <Kpi href="/returns" icon={Undo2} label="Returns" value={stats?.returns} tone="pink" loading={loading} />
       </div>
 
