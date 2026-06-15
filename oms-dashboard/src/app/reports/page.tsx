@@ -126,7 +126,7 @@ export default function ReportsPage() {
               sub={rep.summary.revenueGrowthPct != null ? `${rep.summary.revenueGrowthPct >= 0 ? '▲' : '▼'} ${Math.abs(rep.summary.revenueGrowthPct)}% MoM` : undefined}
               subTone={rep.summary.revenueGrowthPct != null && rep.summary.revenueGrowthPct < 0 ? 'down' : 'up'} />
             <Kpi icon={ShoppingBag} label="Orders" value={num(rep.summary.ordersCount)} tone="violet" />
-            <Kpi icon={Package} label="Units Sold" value={num(rep.summary.unitsSold)} tone="blue" sub={`${rep.summary.itemsPerOrder} / order`} />
+            <Kpi icon={Package} label="Units Sold" value={num(rep.summary.unitsSold)} tone="blue" sub={`${rep.summary.itemsPerOrder}/order · ${num(rep.summary.skuCount)} SKUs`} />
             <Kpi icon={Gauge} label="Avg Order Value" value={formatINR(rep.summary.aov)} tone="amber" />
             <Kpi icon={Coins} label="Seller Settlement" value={formatINR(rep.summary.sellerSettlement)} tone="emerald" sub="net of Myntra charges" />
             <Kpi icon={Coins} label="Tax Collected" value={formatINR(rep.summary.taxCollected)} tone="zinc" />
@@ -135,7 +135,6 @@ export default function ReportsPage() {
             <Kpi icon={Boxes} label="Stock on Hand" value={num(rep.summary.totalCurrentStock)} tone="emerald" sub={rep.summary.outOfStockCount != null ? `${rep.summary.outOfStockCount} out of stock` : 'live stock N/A'} />
             <Kpi icon={Gauge} label="Sell-through" value={pct(rep.summary.sellThroughRate)} tone="indigo" />
             <Kpi icon={Layers} label="Inventory Turnover" value={rep.summary.inventoryTurnover != null ? `${rep.summary.inventoryTurnover}×` : '—'} tone="violet" />
-            <Kpi icon={Boxes} label="Active SKUs" value={num(rep.summary.skuCount)} tone="zinc" />
           </div>
 
           {/* Revenue trend + category split */}
