@@ -16,18 +16,50 @@ const INTERNAL_TO_CODE = {
 const isPush = (o) => o && o.source === 'push';
 const lines = (o) => Array.from(o.lineMap.values());
 
-function inboxSummary(o) {
+// The Inbox stores the status from the last webhook Myntra pushed, which goes stale
+// the moment we move an order forward (RTD/RTS) via the live API — Myntra doesn't
+// always push a follow-up Update Order webhook. So we reconcile inbox rows against
+// the authoritative live order list: sellerOrderId -> current summary status code.
+async function liveStatusMap() {
+  const map = new Map();
+  const collect = (body) => {
+    for (const o of (Array.isArray(body && body.data) ? body.data : [])) {
+      for (const l of (o.orderLines || [])) {
+        if (l.sellerOrderId) map.set(String(l.sellerOrderId), String(l.status || '').toUpperCase());
+      }
+    }
+  };
+  const first = (await myntraClient.fetchOrderList({ page: 0 })).body || {};
+  collect(first);
+  const pages = first.pages || 1;
+  if (pages > 1) {
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, i) => myntraClient.fetchOrderList({ page: i + 1 })),
+    );
+    rest.forEach((r) => collect(r.body || {}));
+  }
+  return map;
+}
+
+// Live summary status is blank for completed/closed orders; treat blank as "no live
+// signal" and keep the cached value in that case.
+const reconciled = (o, live, cached) => {
+  const liveCode = live && live.get(String(o.sellerOrderId));
+  return liveCode ? liveCode : cached;
+};
+
+function inboxSummary(o, live) {
   return {
     orderId: o.sellerOrderId,
     orderLines: lines(o).map((l) => ({
       orderLineId: String(l.orderLineId),
       sellerOrderId: o.sellerOrderId,
-      status: l.cancelled ? 'IC' : (INTERNAL_TO_CODE[o.status] || o.status),
+      status: l.cancelled ? 'IC' : reconciled(o, live, INTERNAL_TO_CODE[o.status] || o.status),
     })),
   };
 }
-function inboxDetail(o) {
-  const code = INTERNAL_TO_CODE[o.status] || o.status;
+function inboxDetail(o, live) {
+  const code = reconciled(o, live, INTERNAL_TO_CODE[o.status] || o.status);
   const r = o.receiver || {};
   return {
     statusCode: 1005, statusMessage: 'Order retrieved successfully', statusType: 'SUCCESS',
@@ -382,22 +414,26 @@ router.get('/orders/api/skus', dashboardGate, async (_req, res) => {
 // ───────── Inbox: orders & returns Myntra PUSHED to our webhook (local store) ─────────
 // Real-time work queue, independent of getOrderList. Status-change actions still hit the
 // live Myntra API (these are real Myntra orders) via /orders/api/action.
-router.get('/orders/api/inbox/list', dashboardGate, (req, res) => {
+router.get('/orders/api/inbox/list', dashboardGate, async (req, res) => {
   const wanted = req.query.statusCode ? String(req.query.statusCode).toUpperCase() : null;
+  let live = new Map();
+  try { live = await liveStatusMap(); } catch { /* fall back to cached webhook status */ }
   const orders = [];
   for (const o of db.orders.values()) {
     if (!isPush(o)) continue;
-    const s = inboxSummary(o);
+    const s = inboxSummary(o, live);
     if (wanted && s.orderLines[0] && s.orderLines[0].status !== wanted) continue;
     orders.push(s);
   }
   res.json({ ok: true, page: 0, totalCount: orders.length, pages: 1, orders });
 });
 
-router.get('/orders/api/inbox/detail/:sellerOrderId', dashboardGate, (req, res) => {
+router.get('/orders/api/inbox/detail/:sellerOrderId', dashboardGate, async (req, res) => {
   const o = db.orders.get(req.params.sellerOrderId);
   if (!o || !isPush(o)) return res.json({ ok: false, error: 'Order not found in inbox' });
-  res.json({ ok: true, detail: inboxDetail(o) });
+  let live = new Map();
+  try { live = await liveStatusMap(); } catch { /* fall back to cached webhook status */ }
+  res.json({ ok: true, detail: inboxDetail(o, live) });
 });
 
 // Inbox documents are served from the LOCAL store (these packets aren't in Myntra).
