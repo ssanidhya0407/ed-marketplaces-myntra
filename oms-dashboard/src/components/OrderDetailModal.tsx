@@ -334,10 +334,10 @@ export default function OrderDetailModal({
               </div>
             </Section>
 
-            {/* Items */}
+            {/* Items — image shown large in its own space, data below */}
             <Section title={`Items (${lines.length})`} icon={Box}>
-              <div className="space-y-2">
-                {lines.map((l) => <ItemRow key={l.orderLineId} l={l} source={source} />)}
+              <div className={cx('grid gap-3', lines.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1')}>
+                {lines.map((l) => <ItemCard key={l.orderLineId} l={l} source={source} />)}
               </div>
             </Section>
 
@@ -538,7 +538,7 @@ function Field({ icon: Icon, label, value }: { icon: LucideIcon; label: string; 
   );
 }
 
-function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
+function ItemCard({ l, source }: { l: any; source: 'live' | 'inbox' }) {
   // Truly cancelled only if the line is IC or Myntra stamped cancelledOn. A bare
   // cancellationReason with no cancelledOn is a *request* that was never actioned.
   const cancelled = String(l.status_code || '').toUpperCase() === 'IC' || !!l.cancelledOn;
@@ -546,30 +546,38 @@ function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
   const img = l.imageUrl || l.image || skuImage(l.sku);
   return (
     <div className={cx(
-      'rounded-2xl border p-3.5 flex items-start gap-3.5 transition-colors',
+      'rounded-2xl border overflow-hidden transition-colors',
       cancelled ? 'border-rose-200/70 bg-rose-50/30' : 'border-black/[0.06] hover:border-black/[0.1]',
     )}>
-      {img ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={img} alt={l.sku || ''} className={cx('w-16 h-16 rounded-xl object-cover border border-black/[0.06] shrink-0', cancelled && 'opacity-60 grayscale')} />
-      ) : (
-        <div className={cx(
-          'w-16 h-16 rounded-xl flex items-center justify-center text-[16px] font-bold shrink-0',
-          cancelled ? 'bg-rose-100 text-rose-500' : 'bg-indigo-50 text-indigo-600',
-        )}>
-          {(l.sku || '?').slice(0, 2).toUpperCase()}
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={cx('font-semibold text-[15px] truncate', cancelled ? 'text-zinc-500 line-through' : 'text-zinc-900')}>{l.sku || '—'}</span>
-          <StatusBadge code={l.status_code} />
-        </div>
-        <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
-          Line {l.orderLineId}{l.packetId ? <> · Packet {l.packetId}</> : ''}
+      {/* Large product image — shown big in its own space */}
+      <div className="relative w-full h-[512px] bg-gradient-to-br from-zinc-50 to-zinc-100 flex items-center justify-center p-4 border-b border-black/[0.05]">
+        {img ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={img} alt={l.sku || ''} className={cx('max-w-full max-h-full object-contain rounded-lg', cancelled && 'opacity-60 grayscale')} />
+        ) : (
+          <div className={cx('text-[44px] font-bold', cancelled ? 'text-rose-300' : 'text-indigo-300')}>
+            {(l.sku || '?').slice(0, 2).toUpperCase()}
+          </div>
+        )}
+        <div className="absolute top-2.5 left-2.5"><StatusBadge code={l.status_code} /></div>
+      </div>
+
+      {/* Item data */}
+      <div className="p-3.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={cx('font-semibold text-[14px] truncate', cancelled ? 'text-zinc-500 line-through' : 'text-zinc-900')}>{l.sku || '—'}</div>
+            <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
+              Line {l.orderLineId}{l.packetId ? <> · Packet {l.packetId}</> : ''}
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className={cx('font-bold text-[15px] tabular-nums', cancelled ? 'text-zinc-400 line-through' : 'text-zinc-900')}>{formatINR(l.lineFinalAmount ?? l.mrp)}</div>
+            {discounted && <div className="text-[11px] text-zinc-400 line-through tabular-nums">{formatINR(l.mrp)}</div>}
+          </div>
         </div>
         {l.cancellationReason && (
-          <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-rose-50 border border-rose-200/70 px-2.5 py-1.5">
+          <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-rose-50 border border-rose-200/70 px-2.5 py-1.5">
             <Ban size={13} className="text-rose-500 mt-px shrink-0" />
             <div className="min-w-0">
               <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wide">{cancelled ? 'Cancelled' : 'Cancellation requested'}</div>
@@ -578,7 +586,7 @@ function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
           </div>
         )}
         {l.packetId ? (
-          <div className="flex gap-3 mt-2">
+          <div className="flex gap-3 mt-2.5">
             <a href={api.labelUrl(l.packetId, source)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] font-semibold text-indigo-600 hover:text-indigo-800">
               <Download size={13} /> Label
             </a>
@@ -587,10 +595,6 @@ function ItemRow({ l, source }: { l: any; source: 'live' | 'inbox' }) {
             </a>
           </div>
         ) : null}
-      </div>
-      <div className="text-right shrink-0">
-        <div className={cx('font-bold text-[16px] tabular-nums', cancelled ? 'text-zinc-400 line-through' : 'text-zinc-900')}>{formatINR(l.lineFinalAmount ?? l.mrp)}</div>
-        {discounted && <div className="text-[11px] text-zinc-400 line-through tabular-nums">{formatINR(l.mrp)}</div>}
       </div>
     </div>
   );

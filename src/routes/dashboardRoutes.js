@@ -16,18 +16,59 @@ const INTERNAL_TO_CODE = {
 const isPush = (o) => o && o.source === 'push';
 const lines = (o) => Array.from(o.lineMap.values());
 
-function inboxSummary(o) {
+// The Inbox stores the status from the last webhook Myntra pushed, which goes stale
+// the moment we move an order forward (RTD/RTS) via the live API — Myntra doesn't
+// always push a follow-up Update Order webhook. So we reconcile inbox rows against
+// the authoritative live order list: sellerOrderId -> current summary status code.
+async function liveStatusMap() {
+  const map = new Map();
+  const collect = (body) => {
+    for (const o of (Array.isArray(body && body.data) ? body.data : [])) {
+      for (const l of (o.orderLines || [])) {
+        if (l.sellerOrderId) map.set(String(l.sellerOrderId), String(l.status || '').toUpperCase());
+      }
+    }
+  };
+  const first = (await myntraClient.fetchOrderList({ page: 0 })).body || {};
+  collect(first);
+  const pages = first.pages || 1;
+  if (pages > 1) {
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, i) => myntraClient.fetchOrderList({ page: i + 1 })),
+    );
+    rest.forEach((r) => collect(r.body || {}));
+  }
+  return map;
+}
+
+// Live summary status is blank for completed/closed orders; treat blank as "no live
+// signal" and keep the cached value in that case.
+const reconciled = (o, live, cached) => {
+  const liveCode = live && live.get(String(o.sellerOrderId));
+  return liveCode ? liveCode : cached;
+};
+
+// The Inbox only holds orders that are still in progress — newly pushed (RFR) or
+// accepted/awaiting dispatch (WP). The moment an order moves out of that state
+// (packed/shipped/delivered/cancelled/completed) it drops out of the Inbox.
+const IN_PROGRESS = new Set(['RFR', 'WP']);
+function isInboxInProgress(o, live) {
+  if (lines(o).some((l) => l.cancelled)) return false;
+  return IN_PROGRESS.has(reconciled(o, live, INTERNAL_TO_CODE[o.status] || o.status));
+}
+
+function inboxSummary(o, live) {
   return {
     orderId: o.sellerOrderId,
     orderLines: lines(o).map((l) => ({
       orderLineId: String(l.orderLineId),
       sellerOrderId: o.sellerOrderId,
-      status: l.cancelled ? 'IC' : (INTERNAL_TO_CODE[o.status] || o.status),
+      status: l.cancelled ? 'IC' : reconciled(o, live, INTERNAL_TO_CODE[o.status] || o.status),
     })),
   };
 }
-function inboxDetail(o) {
-  const code = INTERNAL_TO_CODE[o.status] || o.status;
+function inboxDetail(o, live) {
+  const code = reconciled(o, live, INTERNAL_TO_CODE[o.status] || o.status);
   const r = o.receiver || {};
   return {
     statusCode: 1005, statusMessage: 'Order retrieved successfully', statusType: 'SUCCESS',
@@ -227,14 +268,323 @@ router.get('/orders/api/stats', dashboardGate, async (_req, res) => {
     // Myntra's list filter doesn't accept 'C', so derive Completed/closed as the
     // remainder (these come back with a blank summary status from getOrderList).
     const counted = Object.values(byStatus).reduce((a, b) => a + (b || 0), 0);
+    // Inbox count mirrors the list: only orders still in progress.
+    let live = new Map();
+    try { live = await liveStatusMap(); } catch { /* fall back to cached status */ }
+    let inboxOrders = 0;
+    for (const o of db.orders.values()) {
+      if (isPush(o) && isInboxInProgress(o, live)) inboxOrders += 1;
+    }
     return res.json({
       ok: true,
       total,
       byStatus,
       completed: Math.max(0, total - counted),
-      inboxOrders: db.orders.size,
+      inboxOrders,
       returns: db.returns.size,
     });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// ── 360° Sales Report ──────────────────────────────────────────────────────────
+// Aggregates every order's live detail (+ current inventory + local returns) into a
+// detailed, exportable sales report: SKU-wise, category-wise, region-wise, payment,
+// time-series, returns and inventory health. Cached briefly since it fans out one
+// detail call per order.
+const round = (n, d = 0) => { const f = 10 ** d; return Math.round((Number(n) || 0) * f) / f; };
+const REPORT_STATUS_LABEL = {
+  RFR: 'New', WP: 'In Progress', PK: 'Packed', SH: 'Shipped', S: 'Shipped',
+  DL: 'Delivered', D: 'Delivered', C: 'Completed', IC: 'Cancelled', '': 'Completed',
+};
+// SKUs here read like "Earrings359" / "Necklace707"; the leading word is the category.
+const categoryOf = (sku) => {
+  const m = String(sku || '').match(/^([A-Za-z][A-Za-z\s&-]*?)\s*\d*$/);
+  const base = (m ? m[1] : '').trim();
+  return base || 'Other';
+};
+// Myntra returns dates as "dd-MM-yyyy HH:mm:ss" (e.g. "14-06-2026 12:15:25"),
+// which Date.parse can't read. Parse that explicitly, falling back to ISO.
+function parseMyntraDate(s) {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{2})[-/](\d{2})[-/](\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    const t = Date.UTC(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+    return Number.isNaN(t) ? null : new Date(t);
+  }
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? null : new Date(t);
+}
+// No explicit order-creation field exists; ship-by time is the earliest universal
+// timestamp (set at order placement as the SLA deadline), so it proxies the order date.
+const REPORT_DATE_KEYS = ['createdOn', 'orderCreatedTime', 'orderDate', 'shipByTime', 'invoiceDate', 'packedOn', 'packByTime', 'customerPromiseTime', 'expectedDeliveryTime'];
+function pickDate(...objs) {
+  for (const o of objs) {
+    if (!o) continue;
+    for (const k of REPORT_DATE_KEYS) {
+      if (o[k]) { const d = parseMyntraDate(o[k]); if (d) return d; }
+    }
+  }
+  return null;
+}
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length || 1) }, async () => {
+    while (i < items.length) { const idx = i; i += 1; out[idx] = await fn(items[idx], idx); }
+  });
+  await Promise.all(workers);
+  return out;
+}
+let reportCache = null; // { at, data }
+const REPORT_TTL_MS = 5 * 60 * 1000;
+
+router.get('/orders/api/report', dashboardGate, async (req, res) => {
+  try {
+    if (String(req.query.refresh || '') !== '1' && reportCache && (Date.now() - reportCache.at) < REPORT_TTL_MS) {
+      return res.json({ ok: true, cached: true, ...reportCache.data });
+    }
+
+    // 1) Every order summary (all pages, unfiltered).
+    const first = (await myntraClient.fetchOrderList({ page: 0 })).body || {};
+    let items = Array.isArray(first.data) ? first.data : [];
+    const pages = first.pages || 1;
+    for (let p = 1; p < pages; p += 1) {
+      const r = await myntraClient.fetchOrderList({ page: p });
+      if (r.body && Array.isArray(r.body.data)) items = items.concat(r.body.data);
+    }
+    const summaryById = new Map();
+    for (const it of items) {
+      const sid = (it.orderLines || []).map((l) => l.sellerOrderId).find(Boolean);
+      if (sid && !summaryById.has(sid)) {
+        summaryById.set(sid, { status: String((it.orderLines[0] && it.orderLines[0].status) || '').toUpperCase(), listItem: it });
+      }
+    }
+    const sids = [...summaryById.keys()];
+
+    // 2) Live detail per order (concurrency-limited fan-out).
+    const details = await mapLimit(sids, 8, async (sid) => {
+      try { return { sid, body: (await myntraClient.fetchOrderById(sid)).body || {} }; }
+      catch { return { sid, body: null }; }
+    });
+
+    // 3) Normalize into order + line records.
+    const orders = [];
+    const skuSet = new Set();
+    for (const { sid, body } of details) {
+      const meta = summaryById.get(sid) || {};
+      const det = body || {};
+      const entries = Array.isArray(det.orderLineEntries) ? det.orderLineEntries : [];
+      const date = pickDate(entries[0], det, meta.listItem);
+      const region = det.stateName || det.state || 'Unknown';
+      const payment = ['on', 'prepaid'].includes(String(det.paymentMethod || '').toLowerCase())
+        ? 'Prepaid' : (det.paymentMethod ? 'COD' : 'Unknown');
+      const status = meta.status || (entries[0] && entries[0].status_code) || '';
+      const lineRecs = entries.map((l) => {
+        const qty = Number(l.quantity) > 0 ? Number(l.quantity) : 1;
+        const gross = Number(l.lineFinalAmount) || Number(l.mrp) || 0;
+        const tax = (Array.isArray(l.taxEntries) ? l.taxEntries.reduce((t, e) => t + (Number(e.unitTaxAmount) || 0), 0) : 0) * qty;
+        const skuStr = String(l.sku || '—');
+        if (l.sku) skuSet.add(skuStr);
+        return {
+          orderLineId: String(l.orderLineId || ''), sku: skuStr, category: categoryOf(skuStr),
+          qty, gross, tax, settlement: (Number(l.lineSellerFinalAmount) || 0) * qty,
+          cancelled: String(l.status_code || '').toUpperCase() === 'IC' || !!l.cancelledOn,
+        };
+      });
+      orders.push({ sid, date: date ? date.toISOString() : null, status, region, city: det.city || null, payment, lines: lineRecs });
+    }
+    const detailBySid = new Map(orders.map((o) => [o.sid, o]));
+
+    // 4) Current inventory per SKU (Search Inventory, 10/call).
+    const skus = [...skuSet];
+    const stock = {};
+    const stockFailed = [];
+    for (let k = 0; k < skus.length; k += 10) {
+      const chunk = skus.slice(k, k + 10);
+      try {
+        const r = await myntraClient.searchInventory(chunk);
+        const b = r.body || {};
+        if (r.status === 200 && b.statusType !== 'ERROR') {
+          for (const d of b.inventoryDetails || []) {
+            stock[d.sku] = (d.stores || []).reduce((s, st) => s + (Number(st.inventoryCount) || 0), 0);
+          }
+          for (const f of b.failedEntries || []) stockFailed.push(f);
+        } else { stockFailed.push(...chunk); }
+      } catch { stockFailed.push(...chunk); }
+    }
+
+    // 5) Returns mapped to SKU/category/value (via the order detail we already have).
+    const returns = [];
+    for (const r of db.returns.values()) {
+      const ord = r.sellerOrderId ? detailBySid.get(r.sellerOrderId) : null;
+      const line = ord
+        ? (ord.lines.find((x) => x.orderLineId && String(x.orderLineId) === String(r.orderLineId)) || ord.lines[0])
+        : null;
+      returns.push({
+        id: r.id, sellerOrderId: r.sellerOrderId || null,
+        sku: line ? line.sku : null, category: line ? line.category : null,
+        value: line ? round(line.gross) : 0, type: r.type || null,
+        reason: r.reason || null, status: r.status || null, createdOn: r.createdOn || null,
+      });
+    }
+
+    // 6) Aggregate.
+    const activeLines = (o) => o.lines.filter((l) => !l.cancelled);
+    const sumBy = (o, sel, pred = () => true) => o.lines.filter(pred).reduce((a, l) => a + sel(l), 0);
+
+    const dts = orders.map((o) => o.date).filter(Boolean).map((d) => new Date(d).getTime());
+    const minD = dts.length ? new Date(Math.min(...dts)) : null;
+    const maxD = dts.length ? new Date(Math.max(...dts)) : null;
+    const windowDays = (minD && maxD) ? Math.max(1, Math.round((maxD - minD) / 86400000) + 1) : 1;
+
+    const hasStock = Object.keys(stock).length > 0;
+    const skuAgg = {};
+    for (const o of orders) {
+      for (const l of o.lines) {
+        const s = skuAgg[l.sku] || (skuAgg[l.sku] = { sku: l.sku, category: l.category, units: 0, revenue: 0, gross: 0, tax: 0, settlement: 0, cancelledUnits: 0, returnedUnits: 0, orders: new Set() });
+        s.gross += l.gross;
+        if (l.cancelled) s.cancelledUnits += l.qty;
+        else { s.units += l.qty; s.revenue += l.gross; s.tax += l.tax; s.settlement += l.settlement; s.orders.add(o.sid); }
+      }
+    }
+    for (const r of returns) if (r.sku && skuAgg[r.sku]) skuAgg[r.sku].returnedUnits += 1;
+
+    const grossSales = orders.reduce((s, o) => s + sumBy(o, (l) => l.gross), 0);
+    const cancelledValue = orders.reduce((s, o) => s + sumBy(o, (l) => l.gross, (l) => l.cancelled), 0);
+    const returnValue = returns.reduce((s, r) => s + (r.value || 0), 0);
+    const taxCollected = orders.reduce((s, o) => s + sumBy(o, (l) => l.tax, (l) => !l.cancelled), 0);
+    const sellerSettlement = orders.reduce((s, o) => s + sumBy(o, (l) => l.settlement, (l) => !l.cancelled), 0);
+    const unitsSold = orders.reduce((s, o) => s + sumBy(o, (l) => l.qty, (l) => !l.cancelled), 0);
+    const netSales = grossSales - cancelledValue - returnValue;
+    const ordersCount = orders.length;
+    const cancelledOrders = orders.filter((o) => o.lines.length && o.lines.every((l) => l.cancelled)).length;
+    const returnCount = returns.length;
+    const totalCurrentStock = Object.values(stock).reduce((a, b) => a + b, 0);
+    const totalRev = Object.values(skuAgg).reduce((a, s) => a + s.revenue, 0) || 1;
+
+    const bySku = Object.values(skuAgg).map((s) => {
+      const velocity = s.units / windowDays;
+      const cur = stock[s.sku] != null ? stock[s.sku] : null;
+      return {
+        sku: s.sku, category: s.category, units: s.units, orders: s.orders.size,
+        revenue: round(s.revenue), tax: round(s.tax), settlement: round(s.settlement),
+        avgPrice: s.units ? round(s.revenue / s.units) : 0,
+        contributionPct: round((s.revenue / totalRev) * 100, 1),
+        cancelledUnits: s.cancelledUnits, returnedUnits: s.returnedUnits,
+        returnRate: s.units ? round((s.returnedUnits / s.units) * 100, 1) : 0,
+        currentStock: cur, velocity: round(velocity, 2),
+        daysOfInventory: (cur != null && velocity > 0) ? round(cur / velocity, 1) : null,
+        sellThrough: (cur != null) ? round((s.units / ((s.units + cur) || 1)) * 100, 1) : null,
+      };
+    }).sort((a, b) => b.revenue - a.revenue).map((s, i) => ({ ...s, rank: i + 1 }));
+
+    const catAgg = {};
+    for (const s of Object.values(skuAgg)) {
+      const c = catAgg[s.category] || (catAgg[s.category] = { category: s.category, units: 0, revenue: 0, returnedUnits: 0, currentStock: 0, skus: 0 });
+      c.units += s.units; c.revenue += s.revenue; c.returnedUnits += s.returnedUnits;
+      c.currentStock += (stock[s.sku] || 0); c.skus += 1;
+    }
+    const byCategory = Object.values(catAgg).map((c) => ({
+      ...c, revenue: round(c.revenue), contributionPct: round((c.revenue / totalRev) * 100, 1),
+      returnRate: c.units ? round((c.returnedUnits / c.units) * 100, 1) : 0,
+    })).sort((a, b) => b.revenue - a.revenue);
+
+    const regAgg = {};
+    for (const o of orders) {
+      const r = regAgg[o.region] || (regAgg[o.region] = { region: o.region, orders: 0, units: 0, revenue: 0 });
+      r.orders += 1; r.units += sumBy(o, (l) => l.qty, (l) => !l.cancelled); r.revenue += sumBy(o, (l) => l.gross, (l) => !l.cancelled);
+    }
+    const byRegion = Object.values(regAgg).map((r) => ({ ...r, revenue: round(r.revenue) })).sort((a, b) => b.revenue - a.revenue);
+
+    const payAgg = {};
+    for (const o of orders) {
+      const p = payAgg[o.payment] || (payAgg[o.payment] = { method: o.payment, orders: 0, revenue: 0 });
+      p.orders += 1; p.revenue += sumBy(o, (l) => l.gross, (l) => !l.cancelled);
+    }
+    const byPayment = Object.values(payAgg).map((p) => ({ ...p, revenue: round(p.revenue) })).sort((a, b) => b.revenue - a.revenue);
+
+    const statAgg = {};
+    for (const o of orders) {
+      const label = REPORT_STATUS_LABEL[o.status] != null ? REPORT_STATUS_LABEL[o.status] : (o.status || 'Completed');
+      const s = statAgg[label] || (statAgg[label] = { status: label, orders: 0, units: 0, revenue: 0 });
+      s.orders += 1; s.units += sumBy(o, (l) => l.qty); s.revenue += sumBy(o, (l) => l.gross);
+    }
+    const byStatus = Object.values(statAgg).map((s) => ({ ...s, revenue: round(s.revenue) })).sort((a, b) => b.revenue - a.revenue);
+
+    const isoWeek = (d) => {
+      const dt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      const day = dt.getUTCDay() || 7; dt.setUTCDate(dt.getUTCDate() + 4 - day);
+      const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+      const wk = Math.ceil((((dt - yearStart) / 86400000) + 1) / 7);
+      return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, '0')}`;
+    };
+    const bucket = (keyFn) => {
+      const m = {};
+      for (const o of orders) {
+        if (!o.date) continue;
+        const k = keyFn(new Date(o.date));
+        const b = m[k] || (m[k] = { key: k, revenue: 0, orders: 0, units: 0 });
+        b.orders += 1; b.units += sumBy(o, (l) => l.qty, (l) => !l.cancelled); b.revenue += sumBy(o, (l) => l.gross, (l) => !l.cancelled);
+      }
+      return Object.values(m).sort((a, b) => a.key.localeCompare(b.key)).map((b) => ({ ...b, revenue: round(b.revenue) }));
+    };
+    const revenueByDay = bucket((d) => d.toISOString().slice(0, 10));
+    const revenueByWeek = bucket(isoWeek);
+    const revenueByMonth = bucket((d) => d.toISOString().slice(0, 7))
+      .map((b, i, arr) => ({ ...b, growthPct: (i > 0 && arr[i - 1].revenue) ? round(((b.revenue - arr[i - 1].revenue) / arr[i - 1].revenue) * 100, 1) : null }));
+
+    const sold = bySku.filter((s) => s.units > 0);
+    const topSkus = sold.slice(0, 10);
+    const bottomSkus = [...sold].sort((a, b) => a.revenue - b.revenue).slice(0, 10);
+    const fastMoving = [...sold].sort((a, b) => b.velocity - a.velocity).slice(0, 10);
+    const slowMoving = [...sold].sort((a, b) => a.velocity - b.velocity).slice(0, 10);
+    const outOfStock = bySku.filter((s) => s.currentStock === 0);
+
+    const orderRows = orders.map((o) => ({
+      sellerOrderId: o.sid, date: o.date,
+      status: REPORT_STATUS_LABEL[o.status] != null ? REPORT_STATUS_LABEL[o.status] : (o.status || 'Completed'),
+      region: o.region, city: o.city, payment: o.payment,
+      units: sumBy(o, (l) => l.qty), gross: round(sumBy(o, (l) => l.gross)),
+      net: round(sumBy(o, (l) => l.gross, (l) => !l.cancelled)),
+      skus: o.lines.map((l) => l.sku).join(', '),
+    })).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+
+    const data = {
+      generatedAt: new Date().toISOString(),
+      window: {
+        from: minD ? minD.toISOString().slice(0, 10) : null,
+        to: maxD ? maxD.toISOString().slice(0, 10) : null,
+        days: windowDays, hasDates: dts.length > 0,
+      },
+      summary: {
+        grossSales: round(grossSales), netSales: round(netSales), cancelledValue: round(cancelledValue),
+        returnValue: round(returnValue), taxCollected: round(taxCollected), sellerSettlement: round(sellerSettlement),
+        ordersCount, unitsSold, aov: round(ordersCount ? netSales / ordersCount : 0),
+        itemsPerOrder: round(ordersCount ? unitsSold / ordersCount : 0, 2),
+        cancelledOrders, cancelRate: round(ordersCount ? (cancelledOrders / ordersCount) * 100 : 0, 1),
+        returnCount, returnedUnits: returnCount, returnRate: round(unitsSold ? (returnCount / unitsSold) * 100 : 0, 1),
+        totalCurrentStock: hasStock ? totalCurrentStock : null,
+        outOfStockCount: hasStock ? outOfStock.length : null,
+        sellThroughRate: hasStock ? round((unitsSold + totalCurrentStock) ? (unitsSold / (unitsSold + totalCurrentStock)) * 100 : 0, 1) : null,
+        inventoryTurnover: (hasStock && totalCurrentStock) ? round(unitsSold / totalCurrentStock, 2) : null,
+        revenueGrowthPct: revenueByMonth.length >= 2 ? revenueByMonth[revenueByMonth.length - 1].growthPct : null,
+        skuCount: skus.length,
+      },
+      byStatus, bySku, byCategory, byRegion, byPayment,
+      revenueByDay, revenueByWeek, revenueByMonth,
+      topSkus, bottomSkus, fastMoving, slowMoving, outOfStock,
+      returns, orders: orderRows,
+      notes: [
+        'Order timestamps use Myntra’s ship-by time — the API returns no explicit order-creation field.',
+        hasStock
+          ? 'Reserved stock isn’t exposed by Myntra’s inventory API, so “Available” equals current stock.'
+          : 'Live inventory was unavailable for these SKUs (Myntra’s search returned none), so stock-based metrics are omitted.',
+      ].filter(Boolean),
+    };
+    reportCache = { at: Date.now(), data };
+    return res.json({ ok: true, cached: false, ...data });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
   }
@@ -382,22 +732,28 @@ router.get('/orders/api/skus', dashboardGate, async (_req, res) => {
 // ───────── Inbox: orders & returns Myntra PUSHED to our webhook (local store) ─────────
 // Real-time work queue, independent of getOrderList. Status-change actions still hit the
 // live Myntra API (these are real Myntra orders) via /orders/api/action.
-router.get('/orders/api/inbox/list', dashboardGate, (req, res) => {
+router.get('/orders/api/inbox/list', dashboardGate, async (req, res) => {
   const wanted = req.query.statusCode ? String(req.query.statusCode).toUpperCase() : null;
+  let live = new Map();
+  try { live = await liveStatusMap(); } catch { /* fall back to cached webhook status */ }
   const orders = [];
   for (const o of db.orders.values()) {
     if (!isPush(o)) continue;
-    const s = inboxSummary(o);
+    // Only keep orders that are still in progress; clear the rest from the Inbox.
+    if (!isInboxInProgress(o, live)) continue;
+    const s = inboxSummary(o, live);
     if (wanted && s.orderLines[0] && s.orderLines[0].status !== wanted) continue;
     orders.push(s);
   }
   res.json({ ok: true, page: 0, totalCount: orders.length, pages: 1, orders });
 });
 
-router.get('/orders/api/inbox/detail/:sellerOrderId', dashboardGate, (req, res) => {
+router.get('/orders/api/inbox/detail/:sellerOrderId', dashboardGate, async (req, res) => {
   const o = db.orders.get(req.params.sellerOrderId);
   if (!o || !isPush(o)) return res.json({ ok: false, error: 'Order not found in inbox' });
-  res.json({ ok: true, detail: inboxDetail(o) });
+  let live = new Map();
+  try { live = await liveStatusMap(); } catch { /* fall back to cached webhook status */ }
+  res.json({ ok: true, detail: inboxDetail(o, live) });
 });
 
 // Inbox documents are served from the LOCAL store (these packets aren't in Myntra).
