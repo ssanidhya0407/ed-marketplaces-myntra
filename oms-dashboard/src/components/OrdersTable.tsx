@@ -5,16 +5,20 @@ import { api, type OrderSummary } from '@/lib/api';
 import type { RowDetail } from '@/lib/useRowDetails';
 import { formatINR } from '@/lib/utils';
 import StatusBadge from './StatusBadge';
+import HoverImage from './HoverImage';
 
 function Thumb({ image }: { image: string | null | undefined }) {
-  if (image) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={image} alt="" className="w-14 h-14 rounded-xl object-cover border border-zinc-200 shrink-0" />;
-  }
   return (
-    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-zinc-50 to-zinc-100 border border-zinc-200 flex items-center justify-center shrink-0">
-      <Package size={22} className="text-zinc-300" />
-    </div>
+    <HoverImage src={image}>
+      {image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={image} alt="" className="w-14 h-14 rounded-xl object-cover border border-zinc-200 shrink-0 cursor-zoom-in" />
+      ) : (
+        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-zinc-50 to-zinc-100 border border-zinc-200 flex items-center justify-center shrink-0">
+          <Package size={22} className="text-zinc-300" />
+        </div>
+      )}
+    </HoverImage>
   );
 }
 

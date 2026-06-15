@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { formatINR, formatDate } from '@/lib/utils';
 import { skuImage } from '@/lib/skuImage';
 import StatusBadge from './StatusBadge';
+import HoverImage from './HoverImage';
 
 const isRTO = (t: string | null | undefined) => String(t || '').toUpperCase() === 'COURIER_RETURN';
 
@@ -108,10 +109,12 @@ export default function ReturnDetailModal({ id, onClose, onViewOrder }: { id: st
             <div>
               <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider"><Package size={13} className="text-zinc-400" /> Returned item</div>
               <div className="rounded-2xl border border-black/[0.06] p-3.5 flex items-center gap-3.5">
-                {img
-                  // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={img} alt={sku || ''} className="w-16 h-16 rounded-xl object-cover border border-black/[0.06] shrink-0" />
-                  : <div className="w-16 h-16 rounded-xl bg-indigo-50 text-indigo-600 font-bold flex items-center justify-center text-[16px] shrink-0">{(sku || '?').slice(0, 2).toUpperCase()}</div>}
+                <HoverImage src={img}>
+                  {img
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={img} alt={sku || ''} className="w-16 h-16 rounded-xl object-cover border border-black/[0.06] shrink-0 cursor-zoom-in" />
+                    : <div className="w-16 h-16 rounded-xl bg-indigo-50 text-indigo-600 font-bold flex items-center justify-center text-[16px] shrink-0">{(sku || '?').slice(0, 2).toUpperCase()}</div>}
+                </HoverImage>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-zinc-900 text-[15px] truncate">{sku || '—'}</span>

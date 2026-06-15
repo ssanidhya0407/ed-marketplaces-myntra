@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Percent, Plus, Trash2, Upload, Loader2, FileSpreadsheet, Download as DownloadIcon, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { skuImage } from '@/lib/skuImage';
+import HoverImage from '@/components/HoverImage';
 import { useNotifications } from '@/components/NotificationProvider';
 
 interface Row { sku: string; discount: string }
@@ -141,10 +142,12 @@ export default function DiscountsPage() {
               <tr key={i}>
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2">
-                    {skuImage(row.sku)
-                      // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={skuImage(row.sku) as string} alt="" className="w-12 h-12 rounded-lg object-cover border border-black/[0.06] shrink-0" />
-                      : <div className="w-12 h-12 rounded-lg bg-zinc-100 shrink-0" />}
+                    <HoverImage src={skuImage(row.sku)}>
+                      {skuImage(row.sku)
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={skuImage(row.sku) as string} alt="" className="w-12 h-12 rounded-lg object-cover border border-black/[0.06] shrink-0 cursor-zoom-in" />
+                        : <div className="w-12 h-12 rounded-lg bg-zinc-100 shrink-0" />}
+                    </HoverImage>
                     <input value={row.sku} onChange={(e) => update(i, 'sku', e.target.value)} placeholder="e.g. 8903880486532" className="w-full px-2.5 py-2.5 text-[13px] font-mono bg-white border border-black/[0.08] rounded-lg outline-none focus:border-indigo-400" />
                   </div>
                 </td>

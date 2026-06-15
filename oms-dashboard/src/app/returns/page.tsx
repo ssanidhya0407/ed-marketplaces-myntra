@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { useReturnOrders } from '@/lib/useReturnOrders';
 import ReturnDetailModal from '@/components/ReturnDetailModal';
 import OrderDetailModal from '@/components/OrderDetailModal';
+import HoverImage from '@/components/HoverImage';
 import { formatDate } from '@/lib/utils';
 
 interface ReturnRow {
@@ -169,10 +170,12 @@ export default function ReturnsPage() {
                 <tr key={r.id} onClick={() => setSelectedReturn(r.id)} className="hover:bg-rose-50/40 cursor-pointer transition-colors">
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-3">
-                      {products[r.id]?.image
-                        // eslint-disable-next-line @next/next/no-img-element
-                        ? <img src={products[r.id]!.image as string} alt="" className="w-14 h-14 rounded-xl object-cover border border-zinc-200 shrink-0" />
-                        : <div className="w-14 h-14 rounded-xl bg-zinc-100 flex items-center justify-center text-[12px] font-bold text-zinc-400 shrink-0">{(products[r.id]?.sku || '?').slice(0, 2).toUpperCase()}</div>}
+                      <HoverImage src={products[r.id]?.image}>
+                        {products[r.id]?.image
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={products[r.id]!.image as string} alt="" className="w-14 h-14 rounded-xl object-cover border border-zinc-200 shrink-0 cursor-zoom-in" />
+                          : <div className="w-14 h-14 rounded-xl bg-zinc-100 flex items-center justify-center text-[12px] font-bold text-zinc-400 shrink-0">{(products[r.id]?.sku || '?').slice(0, 2).toUpperCase()}</div>}
+                      </HoverImage>
                       <span className="text-[13px] font-medium text-zinc-800 truncate max-w-[180px]">{products[r.id] === undefined ? <span className="text-zinc-300">…</span> : (products[r.id]?.sku || '—')}</span>
                     </div>
                   </td>
