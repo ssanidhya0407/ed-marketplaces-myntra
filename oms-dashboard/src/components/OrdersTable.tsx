@@ -9,11 +9,11 @@ import StatusBadge from './StatusBadge';
 function Thumb({ image }: { image: string | null | undefined }) {
   if (image) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={image} alt="" className="w-9 h-9 rounded-lg object-cover border border-zinc-200 shrink-0" />;
+    return <img src={image} alt="" className="w-14 h-14 rounded-xl object-cover border border-zinc-200 shrink-0" />;
   }
   return (
-    <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-zinc-50 to-zinc-100 border border-zinc-200 flex items-center justify-center shrink-0">
-      <Package size={15} className="text-zinc-300" />
+    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-zinc-50 to-zinc-100 border border-zinc-200 flex items-center justify-center shrink-0">
+      <Package size={22} className="text-zinc-300" />
     </div>
   );
 }
@@ -25,16 +25,16 @@ function DocsCell({ d, source }: { d: RowDetail | undefined; source: 'live' | 'i
     <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
       <div className="flex gap-1.5">
         <a href={api.labelUrl(d.packetId, source)} target="_blank" rel="noreferrer"
-          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors">
-          <Download size={11} /> Label
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px] font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors">
+          <Download size={13} /> Label
         </a>
         <a href={api.invoiceUrl(d.packetId, source)} target="_blank" rel="noreferrer"
-          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-md transition-colors">
-          <FileText size={11} /> Invoice
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px] font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-md transition-colors">
+          <FileText size={13} /> Invoice
         </a>
       </div>
       {d.invoiceNumber && (
-        <span className="text-[10px] text-zinc-400 font-mono truncate max-w-[160px]"
+        <span className="text-[11px] text-zinc-400 font-mono truncate max-w-[160px]"
           title={`Invoice ${d.invoiceNumber}${d.invoiceDate ? ' · ' + d.invoiceDate : ''}`}>
           #{d.invoiceNumber}
         </span>
@@ -54,8 +54,8 @@ export default function OrdersTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="bg-zinc-50/80 text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">
+      <table className="w-full text-[15px]">
+        <thead className="bg-zinc-50/80 text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">
           <tr>
             <th className="px-4 py-3 text-left">Order · Item</th>
             <th className="px-4 py-3 text-left">Seller Order ID</th>
@@ -80,15 +80,15 @@ export default function OrdersTable({
                 onClick={() => sellerId && onSelect(sellerId)}
                 className="group hover:bg-indigo-50/40 cursor-pointer transition-colors"
               >
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
+                <td className="px-4 py-3.5">
+                  <div className="flex items-center gap-3.5">
                     <Thumb image={d?.image} />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-zinc-900 tabular-nums">{o.orderId}</span>
-                        {isNew && <span className="text-[9px] font-bold bg-gradient-to-r from-rose-500 to-pink-500 text-white px-1.5 py-0.5 rounded">NEW</span>}
+                        <span className="font-semibold text-[16px] text-zinc-900 tabular-nums">{o.orderId}</span>
+                        {isNew && <span className="text-[10px] font-bold bg-gradient-to-r from-rose-500 to-pink-500 text-white px-1.5 py-0.5 rounded">NEW</span>}
                       </div>
-                      <div className="text-[11px] text-zinc-500 truncate max-w-[220px]">
+                      <div className="text-[13px] text-zinc-500 truncate max-w-[240px]">
                         {d === undefined ? <span className="text-zinc-300">loading…</span> : (
                           <>{d.sku || '—'}{d.qty && d.qty > 1 ? <span className="text-zinc-400"> · {d.qty} items</span> : ''}</>
                         )}
@@ -96,17 +96,17 @@ export default function OrdersTable({
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3 font-mono text-[11px] text-zinc-500">{sellerId || '—'}</td>
-                <td className="px-4 py-3 text-right font-semibold text-zinc-900 tabular-nums"
+                <td className="px-4 py-3.5 font-mono text-[12px] text-zinc-500">{sellerId || '—'}</td>
+                <td className="px-4 py-3.5 text-right font-semibold text-[15px] text-zinc-900 tabular-nums"
                   title={d && d.tax != null ? `Order total ${formatINR(d.total ?? d.amount ?? 0)} · tax ${formatINR(d.tax)}` : undefined}>
                   {d === undefined ? <span className="text-zinc-300 font-normal">…</span> : (d.amount != null ? formatINR(d.amount) : '—')}
                   {d && d.tax != null && d.tax > 0 && (
-                    <div className="text-[10px] font-normal text-zinc-400">incl. {formatINR(d.tax)} tax</div>
+                    <div className="text-[11px] font-normal text-zinc-400">incl. {formatINR(d.tax)} tax</div>
                   )}
                 </td>
-                <td className="px-4 py-3"><StatusBadge code={d?.status ?? line?.status} /></td>
-                <td className="px-4 py-3"><DocsCell d={d} source={source} /></td>
-                <td className="px-4 py-3 text-zinc-300 group-hover:text-indigo-400 transition-colors"><ChevronRight size={16} /></td>
+                <td className="px-4 py-3.5"><StatusBadge code={d?.status ?? line?.status} /></td>
+                <td className="px-4 py-3.5"><DocsCell d={d} source={source} /></td>
+                <td className="px-4 py-3.5 text-zinc-300 group-hover:text-indigo-400 transition-colors"><ChevronRight size={18} /></td>
               </tr>
             );
           })}

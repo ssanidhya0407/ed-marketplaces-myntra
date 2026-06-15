@@ -147,8 +147,8 @@ export default function ReturnsPage() {
         {loading && <div className="px-4 py-14 text-center text-sm text-zinc-400">Loading returns…</div>}
         {!loading && error && <div className="px-4 py-12 text-center text-sm text-rose-600">{error}</div>}
         {!loading && !error && (
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-50/80 text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">
+          <table className="w-full text-[15px]">
+            <thead className="bg-zinc-50/80 text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">
               <tr>
                 <th className="px-4 py-3 text-left">Product</th>
                 <th className="px-4 py-3 text-left">Return ID</th>
@@ -167,30 +167,30 @@ export default function ReturnsPage() {
               )}
               {filtered.map((r) => (
                 <tr key={r.id} onClick={() => setSelectedReturn(r.id)} className="hover:bg-rose-50/40 cursor-pointer transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
+                  <td className="px-4 py-3.5">
+                    <div className="flex items-center gap-3">
                       {products[r.id]?.image
                         // eslint-disable-next-line @next/next/no-img-element
-                        ? <img src={products[r.id]!.image as string} alt="" className="w-9 h-9 rounded-lg object-cover border border-zinc-200 shrink-0" />
-                        : <div className="w-9 h-9 rounded-lg bg-zinc-100 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">{(products[r.id]?.sku || '?').slice(0, 2).toUpperCase()}</div>}
-                      <span className="text-[12px] font-medium text-zinc-800 truncate max-w-[140px]">{products[r.id] === undefined ? <span className="text-zinc-300">…</span> : (products[r.id]?.sku || '—')}</span>
+                        ? <img src={products[r.id]!.image as string} alt="" className="w-14 h-14 rounded-xl object-cover border border-zinc-200 shrink-0" />
+                        : <div className="w-14 h-14 rounded-xl bg-zinc-100 flex items-center justify-center text-[12px] font-bold text-zinc-400 shrink-0">{(products[r.id]?.sku || '?').slice(0, 2).toUpperCase()}</div>}
+                      <span className="text-[13px] font-medium text-zinc-800 truncate max-w-[180px]">{products[r.id] === undefined ? <span className="text-zinc-300">…</span> : (products[r.id]?.sku || '—')}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[11px] text-zinc-700">{r.id}</td>
-                  <td className="px-4 py-3">
-                    <span className={'text-[10px] font-semibold px-2 py-0.5 rounded-md border ' + (isRTO(r.type) ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200')}>
+                  <td className="px-4 py-3.5 font-mono text-[12px] text-zinc-700">{r.id}</td>
+                  <td className="px-4 py-3.5">
+                    <span className={'text-[11px] font-semibold px-2 py-0.5 rounded-md border ' + (isRTO(r.type) ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200')}>
                       {isRTO(r.type) ? 'RTO' : 'Customer'}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3.5">
                     <div className="flex items-center gap-1.5">
-                      <span className={'text-[10px] font-semibold px-2 py-0.5 rounded-md border ' + statusTone(live[r.id]?.status || r.status)}>{live[r.id]?.status || r.status || '—'}</span>
-                      {live[r.id]?.confirmed && <CheckCircle2 size={12} className="text-emerald-500" aria-label="reconciled with Myntra" />}
+                      <span className={'text-[11px] font-semibold px-2 py-0.5 rounded-md border ' + statusTone(live[r.id]?.status || r.status)}>{live[r.id]?.status || r.status || '—'}</span>
+                      {live[r.id]?.confirmed && <CheckCircle2 size={13} className="text-emerald-500" aria-label="reconciled with Myntra" />}
                     </div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[11px] text-zinc-500">{r.trackingNumber || '—'}</td>
-                  <td className="px-4 py-3 text-[11px] text-zinc-500">{r.createdOn ? formatDate(r.createdOn) : '—'}</td>
-                  <td className="px-4 py-3 text-[12px] text-zinc-600 max-w-[240px] truncate" title={r.reason || ''}>{r.reason || '—'}</td>
+                  <td className="px-4 py-3.5 font-mono text-[12px] text-zinc-500">{r.trackingNumber || '—'}</td>
+                  <td className="px-4 py-3.5 text-[12px] text-zinc-500">{r.createdOn ? formatDate(r.createdOn) : '—'}</td>
+                  <td className="px-4 py-3.5 text-[13px] text-zinc-600 max-w-[240px] truncate" title={r.reason || ''}>{r.reason || '—'}</td>
                 </tr>
               ))}
             </tbody>
