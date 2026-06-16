@@ -5,6 +5,8 @@ const env = require('../config/env');
 const myntraClient = require('../services/myntraClient');
 const db = require('../db/mockDb');
 const { buildPdf } = require('../utils/miniPdf');
+const auth = require('../middleware/dashboardAuth');
+const dashboardPush = require('../services/dashboardPush');
 
 const router = express.Router();
 
@@ -91,13 +93,46 @@ function inboxDetail(o, live) {
   };
 }
 
-// Optional light gate: if DASHBOARD_KEY is set, the page/API require ?key=<value>.
-// Left open by default so the warehouse team can just open the URL.
+// Gate for every dashboard data route. A valid signed session cookie (set by the
+// /orders/api/auth/login flow below) is the primary credential. The legacy
+// DASHBOARD_KEY query param still works as a fallback. If neither sign-in nor a
+// key is configured on the server, the dashboard stays open (original behaviour).
 function dashboardGate(req, res, next) {
-  if (!env.dashboardKey) return next();
-  if (req.query.key && req.query.key === env.dashboardKey) return next();
-  return res.status(401).json({ error: 'Unauthorized. Append ?key=<dashboard key> to the URL.' });
+  if (auth.getSession(req)) return next();
+  if (env.dashboardKey && req.query.key === env.dashboardKey) return next();
+  if (!auth.authConfigured() && !env.dashboardKey) return next();
+  return res.status(401).json({ error: 'Unauthorized. Please sign in.' });
 }
+
+// ── Auth: single shared email/password login (no gate — these issue the session) ──
+router.post('/orders/api/auth/login', (req, res) => {
+  if (!auth.authConfigured()) {
+    return res.status(503).json({ ok: false, error: 'Login is not configured on the server.' });
+  }
+  const { email, password } = req.body || {};
+  const emailOk = String(email || '').trim().toLowerCase() === env.authEmail.toLowerCase();
+  const passOk = auth.verifyPassword(password, env.authPasswordHash);
+  if (!emailOk || !passOk) {
+    return res.status(401).json({ ok: false, error: 'Invalid email or password.' });
+  }
+  auth.setSessionCookie(res, auth.signSession(env.authEmail));
+  return res.json({ ok: true, email: env.authEmail });
+});
+
+router.post('/orders/api/auth/logout', (_req, res) => {
+  auth.clearSessionCookie(res);
+  return res.json({ ok: true });
+});
+
+router.get('/orders/api/auth/me', (req, res) => {
+  const session = auth.getSession(req);
+  return res.json({
+    ok: true,
+    configured: auth.authConfigured(),
+    authenticated: Boolean(session),
+    email: session ? session.sub : null,
+  });
+});
 
 // Human-friendly labels for Myntra order status codes.
 const STATUS_LABELS = {
@@ -842,6 +877,21 @@ router.get('/orders/api/return-details/:id', dashboardGate, async (req, res) => 
       message: body.statusMessage || body.message || null,
       detail: data[0] || null,
     });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Push the live Myntra orders + returns to dashboardweb's ingest endpoint, so the
+// data lands alongside Amazon/Flipkart/Meesho in the unified store. Manual trigger
+// (also safe to call from a cron). Target + key come from env (DASHBOARDWEB_INGEST_*).
+router.post('/orders/api/push-to-dashboard', dashboardGate, async (req, res) => {
+  try {
+    const result = await dashboardPush.pushToDashboard({
+      baseUrl: req.body && req.body.baseUrl,
+      key: req.body && req.body.key,
+    });
+    return res.status(result.ok ? 200 : 502).json(result);
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
   }

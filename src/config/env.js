@@ -46,6 +46,17 @@ const env = {
   myntraPartnerStore: process.env.MYNTRA_PARTNER_STORE || 'MYNTRA',
   // Optional shared key to gate the warehouse orders dashboard (empty = open access).
   dashboardKey: process.env.DASHBOARD_KEY || '',
+  // Single shared email/password login for the dashboard. When all three are set,
+  // the dashboard requires sign-in; the same secret is used by the frontend to
+  // verify the session cookie. See src/middleware/dashboardAuth.js.
+  sessionSecret: process.env.OMS_SESSION_SECRET || '',
+  authEmail: process.env.OMS_AUTH_EMAIL || '',
+  authPasswordHash: process.env.OMS_AUTH_PASSWORD_HASH || '',
+  // Push target: dashboardweb's authenticated Myntra ingest endpoint. The OMS is
+  // the only system that can talk to Myntra, so it pushes normalized orders/returns
+  // to dashboardweb (stored alongside Amazon/Flipkart/Meesho).
+  dashboardIngestUrl: process.env.DASHBOARDWEB_INGEST_URL || '',
+  dashboardIngestKey: process.env.DASHBOARDWEB_INGEST_KEY || '',
 };
 
 module.exports = env;
