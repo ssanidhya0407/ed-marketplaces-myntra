@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes, LayoutDashboard, Percent, BarChart3, LogOut, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { useNotifications } from './NotificationProvider';
+import MyntraLogo from './MyntraLogo';
 import { cx } from '@/lib/utils';
 
 const NAV = [
@@ -175,8 +176,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       )}>
         <div className={cx('mb-6 flex items-center', collapsed ? 'justify-center' : 'px-2 gap-2.5')}>
           <div className="w-9 h-9 rounded-xl bg-white border border-black/[0.06] flex items-center justify-center shadow-sm shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/myntra-logo.svg" alt="Myntra" className="w-6 h-6 object-contain" />
+            <MyntraLogo className="w-6 h-6" />
           </div>
           {!collapsed && (
             <div>

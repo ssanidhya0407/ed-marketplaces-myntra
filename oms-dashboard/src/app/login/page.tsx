@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import MyntraLogo from '@/components/MyntraLogo';
 
 function safeNext(raw: string | null): string {
   // Only allow internal, non-protocol-relative paths to avoid open redirects.
@@ -49,8 +50,7 @@ function LoginForm() {
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-2.5 mb-6 justify-center">
           <div className="w-10 h-10 rounded-xl bg-white border border-black/[0.06] flex items-center justify-center shadow-sm">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/myntra-logo.svg" alt="Myntra" className="w-7 h-7 object-contain" />
+            <MyntraLogo className="w-7 h-7" />
           </div>
           <div className="text-[18px] font-extrabold tracking-tight text-zinc-900">
             Myntra <span className="bg-gradient-to-r from-rose-500 to-pink-600 bg-clip-text text-transparent">OMS</span>
