@@ -6,7 +6,6 @@ const myntraClient = require('../services/myntraClient');
 const db = require('../db/mockDb');
 const { buildPdf } = require('../utils/miniPdf');
 const auth = require('../middleware/dashboardAuth');
-const dashboardPush = require('../services/dashboardPush');
 
 const router = express.Router();
 
@@ -877,21 +876,6 @@ router.get('/orders/api/return-details/:id', dashboardGate, async (req, res) => 
       message: body.statusMessage || body.message || null,
       detail: data[0] || null,
     });
-  } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message });
-  }
-});
-
-// Push the live Myntra orders + returns to dashboardweb's ingest endpoint, so the
-// data lands alongside Amazon/Flipkart/Meesho in the unified store. Manual trigger
-// (also safe to call from a cron). Target + key come from env (DASHBOARDWEB_INGEST_*).
-router.post('/orders/api/push-to-dashboard', dashboardGate, async (req, res) => {
-  try {
-    const result = await dashboardPush.pushToDashboard({
-      baseUrl: req.body && req.body.baseUrl,
-      key: req.body && req.body.key,
-    });
-    return res.status(result.ok ? 200 : 502).json(result);
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
   }

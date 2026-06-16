@@ -52,11 +52,6 @@ const env = {
   sessionSecret: process.env.OMS_SESSION_SECRET || '',
   authEmail: process.env.OMS_AUTH_EMAIL || '',
   authPasswordHash: process.env.OMS_AUTH_PASSWORD_HASH || '',
-  // Push target: dashboardweb's authenticated Myntra ingest endpoint. The OMS is
-  // the only system that can talk to Myntra, so it pushes normalized orders/returns
-  // to dashboardweb (stored alongside Amazon/Flipkart/Meesho).
-  dashboardIngestUrl: process.env.DASHBOARDWEB_INGEST_URL || '',
-  dashboardIngestKey: process.env.DASHBOARDWEB_INGEST_KEY || '',
 };
 
 module.exports = env;
