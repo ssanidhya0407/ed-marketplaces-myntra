@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
-import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes, LayoutDashboard, Percent, BarChart3 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes, LayoutDashboard, Percent, BarChart3, LogOut } from 'lucide-react';
 import { useNotifications } from './NotificationProvider';
 import { cx } from '@/lib/utils';
 
@@ -74,6 +74,45 @@ function NotificationBell() {
   );
 }
 
+function AccountMenu() {
+  const [email, setEmail] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch('/orders/api/auth/me')
+      .then((r) => r.json())
+      .then((d) => setEmail(d?.email ?? null))
+      .catch(() => {});
+  }, []);
+
+  async function logout() {
+    setBusy(true);
+    try {
+      await fetch('/orders/api/auth/logout', { method: 'POST' });
+    } catch {
+      /* ignore — redirect regardless */
+    }
+    window.location.href = '/login';
+  }
+
+  const initial = (email || 'E').trim().charAt(0).toUpperCase();
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm ring-2 ring-white ring-offset-1 ring-offset-[#FAF9F6]" title={email || undefined}>
+        <span className="text-white text-[11px] font-bold">{initial}</span>
+      </div>
+      <button
+        onClick={logout}
+        disabled={busy}
+        title={email ? `Sign out (${email})` : 'Sign out'}
+        className="p-2 text-zinc-400 hover:text-rose-600 hover:bg-white rounded-xl transition-all disabled:opacity-60"
+      >
+        <LogOut size={16} />
+      </button>
+    </div>
+  );
+}
+
 function Toasts() {
   const { toasts, dismissToast } = useNotifications();
   return (
@@ -106,13 +145,16 @@ function Toasts() {
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // The login screen renders full-bleed, without the dashboard chrome.
+  if (pathname === '/login') return <>{children}</>;
   return (
     <div className="min-h-screen bg-[#FAF9F6]">
       {/* Sidebar */}
       <aside className="fixed top-0 left-0 h-screen w-[230px] bg-white border-r border-black/[0.06] flex flex-col px-3 py-5 z-40">
         <div className="px-2 mb-6 flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-sm">
-            <ShoppingBag size={18} className="text-white" />
+          <div className="w-9 h-9 rounded-xl bg-white border border-black/[0.06] flex items-center justify-center shadow-sm shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/myntra-logo.svg" alt="Myntra" className="w-6 h-6 object-contain" />
           </div>
           <div>
             <div className="text-[16px] font-extrabold tracking-tight text-zinc-900 leading-none">
@@ -164,9 +206,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </span>
           <div className="w-px h-5 bg-black/[0.08] mx-1" />
           <NotificationBell />
-          <button className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm ring-2 ring-white ring-offset-1 ring-offset-[#FAF9F6]">
-            <span className="text-white text-[11px] font-bold">E</span>
-          </button>
+          <AccountMenu />
         </header>
         <main className="p-4 sm:p-6">{children}</main>
       </div>
