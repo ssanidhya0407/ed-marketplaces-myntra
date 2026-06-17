@@ -42,11 +42,16 @@ async function liveStatusMap() {
   return map;
 }
 
-// Live summary status is blank for completed/closed orders; treat blank as "no live
-// signal" and keep the cached value in that case.
+// Reconcile an order's status against the authoritative live order list.
+// getOrderList returns completed/closed orders with a BLANK summary status, so a
+// blank-but-PRESENT order means "completed" (code 'C') — NOT "no signal". Only
+// when the order is entirely absent from the live list do we fall back to the
+// cached webhook status. (Treating blank as no-signal kept finished orders stuck
+// in the Inbox with their stale 'WP' webhook status.)
 const reconciled = (o, live, cached) => {
-  const liveCode = live && live.get(String(o.sellerOrderId));
-  return liveCode ? liveCode : cached;
+  const sid = String(o.sellerOrderId);
+  if (live && live.has(sid)) return live.get(sid) || 'C';
+  return cached;
 };
 
 // The Inbox only holds orders that are still in progress — newly pushed (RFR) or
