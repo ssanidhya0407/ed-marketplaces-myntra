@@ -23,8 +23,7 @@ export default function OrderDetailModal({
   const { pushToast } = useNotifications();
 
   // Ready-to-Dispatch (Myntra-generated invoice: minimal body, no seller invoice fields).
-  const [rtdOpen, setRtdOpen] = useState(false);
-  const [rtdSubmitting, setRtdSubmitting] = useState(false);
+  // Fires straight from the button with a single browser confirm — no in-app review panel.
   // Myntra returns the tracking number in the RTD response; keep it so Ready to Ship
   // unlocks immediately even before the order re-fetch reflects it.
   const [rtdTracking, setRtdTracking] = useState('');
@@ -140,22 +139,13 @@ export default function OrderDetailModal({
       setCancelOpen(true);
       return;
     }
-    if (action === 'ready_to_ship') {
-      // RTS is keyed on the Myntra-assigned tracking number from RTD — no typing.
-      if (!trackingNo) {
-        pushToast({ tone: 'err', title: 'No tracking number yet', message: 'This order has not been Ready-to-Dispatched — Myntra assigns the tracking number at RTD.' });
-        return;
-      }
-      body.trackingNo = trackingNo;
-    }
     if (action === 'ready_to_dispatch') {
-      // RTD is confirmed via a short review panel (openRtd/submitRtd).
-      openRtd();
+      // RTD fires directly with a single browser confirm — no in-app review panel.
+      doRtd();
       return;
     }
     const label = ACTION_META[action].label;
-    const extra = action === 'ready_to_ship' ? `\n\nTracking number: ${trackingNo}` : '';
-    if (!window.confirm(`This will ${label.toUpperCase()} on the LIVE Myntra account for order ${sellerOrderId}.${extra}\n\nProceed?`)) return;
+    if (!window.confirm(`This will ${label.toUpperCase()} on the LIVE Myntra account for order ${sellerOrderId}.\n\nProceed?`)) return;
 
     setBusy(action);
     try {
@@ -174,11 +164,7 @@ export default function OrderDetailModal({
     }
   }
 
-  function openRtd() {
-    setRtdOpen(true);
-  }
-
-  async function submitRtd() {
+  async function doRtd() {
     const warehouse = lines[0]?.warehouse || detail.warehouse;
     // Myntra-generated invoice model: the RTD body only needs the order line refs —
     // Myntra produces the invoice and assigns packet/courier/tracking on its side.
@@ -186,7 +172,7 @@ export default function OrderDetailModal({
 
     if (!window.confirm(`Mark order ${sellerOrderId} READY TO DISPATCH on the LIVE Myntra account?\n\nThis packs the order and generates the packet, shipping label, and Myntra invoice. It cannot be cancelled afterwards.`)) return;
 
-    setRtdSubmitting(true);
+    setBusy('ready_to_dispatch');
     try {
       const res = await api.action(sellerOrderId, { action: 'ready_to_dispatch', warehouse, orderLineEntries });
       if (res.ok) {
@@ -195,7 +181,6 @@ export default function OrderDetailModal({
         const tn = res.raw?.trackingNumber || '';
         if (tn) setRtdTracking(tn);
         pushToast({ tone: 'ok', title: 'Ready to Dispatch done', message: `${res.message || 'Order packed'}${tn ? ` · tracking ${tn}` : ''} (code ${res.statusCode ?? res.httpStatus})` });
-        setRtdOpen(false);
         await fetchDetail();
         onMutated?.();
       } else {
@@ -204,7 +189,7 @@ export default function OrderDetailModal({
     } catch (e: any) {
       pushToast({ tone: 'err', title: 'Network error', message: e.message });
     } finally {
-      setRtdSubmitting(false);
+      setBusy(null);
     }
   }
 
@@ -400,41 +385,18 @@ export default function OrderDetailModal({
               </div>
             )}
 
-            {/* Ready-to-Dispatch form (PPMP) */}
-            {rtdOpen && (
-              <div className="bg-indigo-50/50 border border-indigo-200/70 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-[12px] font-semibold text-indigo-700 flex items-center gap-1.5"><Truck size={13} /> Ready to Dispatch — pack &amp; generate label</h4>
-                  <button onClick={() => setRtdOpen(false)} className="text-zinc-400 hover:text-zinc-700"><X size={14} /></button>
+            {/* Ready-to-Dispatch — standalone button (no review panel; one browser confirm). */}
+            {actions.includes('ready_to_dispatch') && (
+              <div className="bg-indigo-50/50 border border-indigo-200/70 rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 text-[12px] text-indigo-700">
+                  <Truck size={14} className="shrink-0" />
+                  <span>Pack this order &amp; generate the label/invoice on Myntra. RTD is irreversible.</span>
                 </div>
-                <div className="rounded-lg border border-black/[0.06] overflow-hidden bg-white">
-                  <table className="w-full text-[11px]">
-                    <thead className="bg-zinc-50 text-[9px] uppercase text-zinc-500">
-                      <tr><th className="px-2.5 py-1.5 text-left">SKU</th><th className="px-2.5 py-1.5 text-right">Unit total</th><th className="px-2.5 py-1.5 text-left">Tax</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
-                      {lines.map((l) => (
-                        <tr key={l.orderLineId}>
-                          <td className="px-2.5 py-1.5 font-semibold">{l.sku}</td>
-                          <td className="px-2.5 py-1.5 text-right tabular-nums">{formatINR(l.lineFinalAmount ?? l.mrp)}</td>
-                          <td className="px-2.5 py-1.5 text-zinc-500">
-                            {Array.isArray(l.taxEntries) && l.taxEntries.length
-                              ? l.taxEntries.map((t: any, i: number) => <span key={i}>{t.taxType} {t.taxRate}%{i < l.taxEntries.length - 1 ? ', ' : ''}</span>)
-                              : <span className="text-zinc-400">none on order</span>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-[10px] text-zinc-500">Myntra generates the invoice for this account — no invoice number needed. Amount &amp; tax shown are as Myntra supplied them. RTD is irreversible — the order cannot be cancelled after this.</p>
-                <div className="flex items-center justify-end gap-2">
-                  <button onClick={() => setRtdOpen(false)} disabled={rtdSubmitting} className="px-3 py-1.5 text-[11px] font-medium text-zinc-600 hover:text-zinc-900 disabled:opacity-50">Cancel</button>
-                  <button onClick={submitRtd} disabled={rtdSubmitting}
-                    className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-lg shadow-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
-                    {rtdSubmitting && <Loader2 size={11} className="animate-spin" />} Confirm Ready to Dispatch
-                  </button>
-                </div>
+                <button onClick={doRtd} disabled={!!busy}
+                  className="flex items-center gap-1.5 px-4 py-2 text-[12px] font-semibold rounded-xl shadow-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+                  {busy === 'ready_to_dispatch' && <Loader2 size={12} className="animate-spin" />}
+                  <Truck size={13} /> Ready to Dispatch
+                </button>
               </div>
             )}
           </div>
@@ -455,13 +417,11 @@ export default function OrderDetailModal({
                 </span>
               ) : actions.map((a) => {
                 const meta = ACTION_META[a];
-                const rtsBlocked = a === 'ready_to_ship' && !trackingNo;
                 return (
                   <button
                     key={a}
                     onClick={() => runAction(a)}
-                    disabled={!!busy || rtsBlocked}
-                    title={rtsBlocked ? 'Needs Ready to Dispatch first — Myntra assigns the tracking number at RTD.' : a === 'ready_to_ship' ? `Tracking: ${trackingNo}` : undefined}
+                    disabled={!!busy}
                     className={cx(
                       'flex items-center gap-1.5 px-4 py-2 text-[12px] font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-50',
                       meta.variant === 'primary' && 'bg-indigo-600 text-white hover:bg-indigo-700',
