@@ -88,8 +88,7 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-[22px] font-bold text-zinc-900 tracking-tight">Sales Report</h1>
           <p className="text-[13px] text-zinc-500 mt-0.5">
-            360° view · EXPERIENCES.DIGITAL on Myntra
-            {rep && <> · {rep.window.from && rep.window.to ? `${rep.window.from} → ${rep.window.to}` : 'all orders'} · {rep.summary.ordersCount} orders</>}
+            360° view{rep && <> · {rep.window.from && rep.window.to ? `${rep.window.from} → ${rep.window.to}` : 'all orders'} · {rep.summary.ordersCount} orders</>}
             {rep?.cached && <span className="ml-1 text-zinc-400">· cached</span>}
           </p>
         </div>

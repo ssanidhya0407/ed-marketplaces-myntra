@@ -37,13 +37,12 @@ export const isNewStatus = (code: string | null | undefined): boolean =>
 export type PartnerModel = 'PPMP' | 'OMNI';
 export const PARTNER_MODEL: PartnerModel = 'PPMP';
 
-export type ActionKey = 'accept' | 'reject' | 'ready_to_dispatch' | 'ready_to_ship' | 'cancel';
+export type ActionKey = 'accept' | 'reject' | 'ready_to_dispatch' | 'cancel';
 
 export const ACTION_META: Record<ActionKey, { label: string; variant: 'primary' | 'danger' | 'neutral' }> = {
   accept:            { label: 'Accept', variant: 'primary' },
   reject:            { label: 'Reject', variant: 'danger' },
   ready_to_dispatch: { label: 'Ready to Dispatch', variant: 'primary' },
-  ready_to_ship:     { label: 'Ready to Ship', variant: 'primary' },
   cancel:            { label: 'Cancel', variant: 'danger' },
 };
 
@@ -56,7 +55,7 @@ export function allowedActions(code: string | null | undefined, model: PartnerMo
       case 'RFR': return ['accept', 'reject'];
       case 'WP':  return ['ready_to_dispatch', 'cancel'];
       case 'PK':
-      case 'RTD': return ['ready_to_ship', 'cancel'];
+      case 'RTD': return ['cancel'];
       default:    return [];
     }
   }
@@ -68,7 +67,7 @@ export function allowedActions(code: string | null | undefined, model: PartnerMo
     case 'RFR': return [];                              // awaiting Myntra release to WP
     case 'WP':  return ['ready_to_dispatch', 'cancel']; // now seller-actionable
     case 'PK':
-    case 'RTD': return ['ready_to_ship', 'cancel'];
+    case 'RTD': return ['cancel'];
     case 'SH':
     case 'DL':
     case 'IC':

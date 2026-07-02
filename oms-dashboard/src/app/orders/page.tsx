@@ -89,7 +89,7 @@ export default function AllOrdersPage() {
       <div className="flex items-end justify-between flex-wrap gap-3 mb-5">
         <div>
           <h1 className="text-[22px] font-bold text-zinc-900 tracking-tight">Orders</h1>
-          <p className="text-[13px] text-zinc-500 mt-0.5">Live order management · EXPERIENCES.DIGITAL on Myntra</p>
+          <p className="text-[13px] text-zinc-500 mt-0.5">Live order management</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
