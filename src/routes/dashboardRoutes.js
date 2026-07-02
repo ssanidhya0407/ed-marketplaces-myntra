@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 
 const env = require('../config/env');
 const myntraClient = require('../services/myntraClient');
@@ -42,6 +43,30 @@ async function liveStatusMap() {
   return map;
 }
 
+// Authoritative in-progress signal: the sellerOrderIds Myntra returns under the RFR (new)
+// and WP (work-in-progress) status FILTERS — the same source the KPIs count. We trust this
+// over the unfiltered list's summary status, which can go stale: an order that has since
+// gone RTO/cancelled can still read 'WP' in the unfiltered list (Myntra doesn't re-stamp the
+// summary), which used to keep dead orders stuck in the Inbox. Returns sellerOrderId -> code.
+async function inProgressStatusMap() {
+  const map = new Map();
+  for (const code of ['RFR', 'WP']) {
+    let page = 0;
+    let pages = 1;
+    do {
+      const body = (await myntraClient.fetchOrderList({ page, statusCode: code })).body || {};
+      for (const o of (Array.isArray(body.data) ? body.data : [])) {
+        for (const l of (o.orderLines || [])) {
+          if (l.sellerOrderId) map.set(String(l.sellerOrderId), code);
+        }
+      }
+      pages = body.pages || 1;
+      page += 1;
+    } while (page < pages);
+  }
+  return map;
+}
+
 // Reconcile an order's status against the authoritative live order list.
 // getOrderList returns completed/closed orders with a BLANK summary status, so a
 // blank-but-PRESENT order means "completed" (code 'C') — NOT "no signal". Only
@@ -54,13 +79,37 @@ const reconciled = (o, live, cached) => {
   return cached;
 };
 
-// The Inbox only holds orders that are still in progress — newly pushed (RFR) or
-// accepted/awaiting dispatch (WP). The moment an order moves out of that state
-// (packed/shipped/delivered/cancelled/completed) it drops out of the Inbox.
+// Resolve which pushed orders are still actionable (RFR / WP) — authoritatively, so the
+// Inbox matches the In-Progress KPI. Three cases, cheapest first:
+//   1. in Myntra's RFR/WP FILTERED lists      -> keep (no detail call)
+//   2. present in the unfiltered list, not 1  -> moved on (PK/SH/DL/IC/blank) -> drop
+//   3. absent from the list entirely          -> ambiguous. Myntra drops terminal orders
+//      (e.g. RTO) from the list, and doesn't always push a follow-up webhook, so the cached
+//      webhook status can be a stale 'WP'. Only here do we spend an order-detail call to read
+//      the true status, and keep it only if it's genuinely still RFR/WP.
+// Returns [{ o, code }] for the kept orders. The verify set is tiny (only stale absentees).
 const IN_PROGRESS = new Set(['RFR', 'WP']);
-function isInboxInProgress(o, live) {
-  if (lines(o).some((l) => l.cancelled)) return false;
-  return IN_PROGRESS.has(reconciled(o, live, INTERNAL_TO_CODE[o.status] || o.status));
+async function resolveInbox() {
+  const [live, inProg] = await Promise.all([liveStatusMap(), inProgressStatusMap()]);
+  const kept = [];
+  const verify = [];
+  for (const o of db.orders.values()) {
+    if (!isPush(o) || lines(o).some((l) => l.cancelled)) continue;
+    const sid = String(o.sellerOrderId);
+    if (inProg.has(sid)) { kept.push({ o, code: inProg.get(sid) }); continue; }
+    if (live.has(sid)) continue; // present but past RFR/WP
+    if (IN_PROGRESS.has(String(INTERNAL_TO_CODE[o.status] || o.status || '').toUpperCase())) verify.push(o);
+  }
+  if (verify.length) {
+    await mapLimit(verify, 6, async (o) => {
+      try {
+        const det = (await myntraClient.fetchOrderById(o.sellerOrderId)).body || {};
+        const code = String((det.orderLineEntries || [])[0]?.status_code || '').toUpperCase();
+        if (IN_PROGRESS.has(code)) kept.push({ o, code });
+      } catch { /* on error, leave it out — safer than showing a stale order */ }
+    });
+  }
+  return kept;
 }
 
 function inboxSummary(o, live) {
@@ -308,12 +357,8 @@ router.get('/orders/api/stats', dashboardGate, async (_req, res) => {
     // remainder (these come back with a blank summary status from getOrderList).
     const counted = Object.values(byStatus).reduce((a, b) => a + (b || 0), 0);
     // Inbox count mirrors the list: only orders still in progress.
-    let live = new Map();
-    try { live = await liveStatusMap(); } catch { /* fall back to cached status */ }
     let inboxOrders = 0;
-    for (const o of db.orders.values()) {
-      if (isPush(o) && isInboxInProgress(o, live)) inboxOrders += 1;
-    }
+    try { inboxOrders = (await resolveInbox()).length; } catch { /* best-effort count */ }
     return res.json({
       ok: true,
       total,
@@ -461,11 +506,17 @@ router.get('/orders/api/report', dashboardGate, async (req, res) => {
       const line = ord
         ? (ord.lines.find((x) => x.orderLineId && String(x.orderLineId) === String(r.orderLineId)) || ord.lines[0])
         : null;
+      // Post-delivery return: the order completed its forward journey (shipped → delivered
+      // → completed) and then reversed — i.e. the underlying line was NOT cancelled. This
+      // separates genuine buyer returns on completed sales from RTO/courier returns whose
+      // order is cancelled (IC) and already counted under Cancellations.
+      const postDelivery = line ? !line.cancelled : (r.type === 'CUSTOMER_RETURN');
       returns.push({
         id: r.id, sellerOrderId: r.sellerOrderId || null,
         sku: line ? line.sku : null, category: line ? line.category : null,
         value: line ? round(line.gross) : 0, type: r.type || null,
         reason: r.reason || null, status: r.status || null, createdOn: r.createdOn || null,
+        postDelivery,
       });
     }
 
@@ -500,6 +551,9 @@ router.get('/orders/api/report', dashboardGate, async (req, res) => {
     const grossSales = orders.reduce((s, o) => s + sumBy(o, (l) => l.gross, (l) => !l.cancelled), 0);
     const cancelledValue = orders.reduce((s, o) => s + sumBy(o, (l) => l.gross, (l) => l.cancelled), 0);
     const returnValue = returns.reduce((s, r) => s + (r.value || 0), 0);
+    const postDeliveryReturnsList = returns.filter((r) => r.postDelivery);
+    const postDeliveryReturns = postDeliveryReturnsList.length;
+    const postDeliveryReturnValue = postDeliveryReturnsList.reduce((s, r) => s + (r.value || 0), 0);
     const taxCollected = orders.reduce((s, o) => s + sumBy(o, (l) => l.tax, (l) => !l.cancelled), 0);
     const sellerSettlement = orders.reduce((s, o) => s + sumBy(o, (l) => l.settlement, (l) => !l.cancelled), 0);
     const unitsSold = orders.reduce((s, o) => s + sumBy(o, (l) => l.qty, (l) => !l.cancelled), 0);
@@ -621,6 +675,8 @@ router.get('/orders/api/report', dashboardGate, async (req, res) => {
         itemsPerOrder: round(ordersCount ? unitsSold / ordersCount : 0, 2),
         cancelledOrders, cancelRate: round(totalOrdersAll ? (cancelledOrders / totalOrdersAll) * 100 : 0, 1),
         returnCount, returnedUnits: returnCount, returnRate: round(unitsSold ? (returnCount / unitsSold) * 100 : 0, 1),
+        postDeliveryReturns, postDeliveryReturnValue: round(postDeliveryReturnValue),
+        postDeliveryReturnRate: round(ordersCount ? (postDeliveryReturns / ordersCount) * 100 : 0, 1),
         totalCurrentStock: hasStock ? totalCurrentStock : null,
         outOfStockCount: hasStock ? outOfStock.length : null,
         sellThroughRate: hasStock ? round((unitsSold + totalCurrentStock) ? (unitsSold / (unitsSold + totalCurrentStock)) * 100 : 0, 1) : null,
@@ -787,19 +843,838 @@ router.get('/orders/api/skus', dashboardGate, async (_req, res) => {
   }
 });
 
+// ───────── Catalog Stock: Amazon∪Flipkart SKUs probed against Myntra inventory ─────────
+// Myntra exposes no "list all inventory" API, so we take the Amazon∪Flipkart catalog
+// (pulled from those marketplace APIs, cached in data/marketplace_skus.json) as the SKU
+// universe and hit Search Inventory (10 SKUs/call) for each. ~1.3k SKUs ≈ 133 calls, so
+// it runs as a background job the page polls; the result is cached in memory (15-min TTL).
+let catalogStockJob = null;
+
+function loadMasterSkus() {
+  const file = path.join(__dirname, '../../data/marketplace_skus.json');
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  return Array.isArray(raw.skus) ? raw.skus : [];
+}
+
+// SKUs seen in Myntra orders the OMS has recorded locally (webhook pushes + processed
+// orders, persisted in db.orders). Free + instant — no API calls. Lets a newly-ordered
+// SKU surface on the Inventory page without regenerating the catalog file.
+function localOrderSkus() {
+  const out = new Set();
+  try {
+    for (const order of db.orders.values()) {
+      const lm = order && order.lineMap;
+      if (!lm || typeof lm.values !== 'function') continue;
+      for (const line of lm.values()) {
+        const s = line && line.sku != null ? String(line.sku).trim() : '';
+        if (s) out.add(s);
+      }
+    }
+  } catch { /* order store is best-effort; never fail the build over it */ }
+  return out;
+}
+
+async function buildCatalogStock(job) {
+  const master = loadMasterSkus();
+  const sourceMap = new Map(master.map((m) => [m.sku, m.sources || []]));
+  const all = master.map((m) => m.sku);
+
+  // Auto-merge: fold in any SKU Myntra has actually ordered from us that isn't already
+  // in the Amazon∪Flipkart catalog file, so new SKUs appear as soon as they sell.
+  const seen = new Set(all);
+  for (const sku of localOrderSkus()) {
+    if (!seen.has(sku)) { seen.add(sku); all.push(sku); sourceMap.set(sku, ['myntra']); }
+  }
+
+  job.total = all.length;
+  const stock = new Map(); // sku -> { byStore, total, onMyntra } | { blocked } | { error }
+  for (let k = 0; k < all.length; k += 10) {
+    const chunk = all.slice(k, k + 10);
+    try {
+      const r = await myntraClient.searchInventory(chunk);
+      const b = r.body || {};
+      if (r.status === 200 && b.statusType !== 'ERROR') {
+        for (const d of b.inventoryDetails || []) {
+          const byStore = {};
+          let total = 0;
+          for (const st of d.stores || []) {
+            const code = String(st.stores_code ?? st.store_code ?? '');
+            const c = Number(st.inventoryCount) || 0;
+            byStore[code] = c; total += c;
+          }
+          stock.set(d.sku, { byStore, total, onMyntra: true });
+        }
+        // Anything not returned in inventoryDetails simply isn't catalogued on Myntra —
+        // that's expected (a SKU can be Amazon/Flipkart-only), not an error.
+      } else {
+        // e.g. Myntra's WAF 403s certain exact SKU strings — flag, don't silently drop.
+        for (const s of chunk) if (!stock.has(s)) stock.set(s, { blocked: true });
+      }
+    } catch {
+      for (const s of chunk) if (!stock.has(s)) stock.set(s, { error: true });
+    }
+    job.done = Math.min(k + 10, all.length);
+  }
+  return all.map((sku) => {
+    const st = stock.get(sku) || {};
+    return {
+      sku,
+      sources: sourceMap.get(sku) || [],
+      onMyntra: !!st.onMyntra,
+      total: st.onMyntra ? st.total : null,
+      active: st.byStore ? (st.byStore['84502'] ?? 0) : null, // 84502 = the push warehouse
+      other: st.byStore ? (st.byStore['80176'] ?? 0) : null,
+      blocked: !!st.blocked,
+      error: !!st.error,
+    };
+  });
+}
+
+function summarizeCatalog(items) {
+  const onMyntra = items.filter((i) => i.onMyntra);
+  const inStock = onMyntra.filter((i) => (i.total || 0) > 0);
+  return {
+    totalSkus: items.length,
+    amazon: items.filter((i) => i.sources.includes('amazon')).length,
+    flipkart: items.filter((i) => i.sources.includes('flipkart')).length,
+    both: items.filter((i) => (i.sources || []).length > 1).length,
+    onMyntra: onMyntra.length,
+    inStock: inStock.length,
+    outOfStock: onMyntra.length - inStock.length,
+    notOnMyntra: items.length - onMyntra.length,
+    blocked: items.filter((i) => i.blocked).length,
+    totalUnits: onMyntra.reduce((a, i) => a + (i.total || 0), 0),
+  };
+}
+
+router.get('/orders/api/catalog-stock', dashboardGate, (req, res) => {
+  const refresh = req.query.refresh === '1';
+  const TTL = 15 * 60 * 1000;
+  const j = catalogStockJob;
+  if (j && j.status === 'done' && !refresh && Date.now() - j.finishedAt < TTL) {
+    return res.json({ status: 'done', generatedAt: new Date(j.finishedAt).toISOString(), summary: summarizeCatalog(j.items), items: j.items });
+  }
+  if (j && j.status === 'running') {
+    return res.json({ status: 'running', done: j.done, total: j.total });
+  }
+  const job = (catalogStockJob = { status: 'running', done: 0, total: 0, startedAt: Date.now() });
+  buildCatalogStock(job)
+    .then((items) => { job.items = items; job.status = 'done'; job.finishedAt = Date.now(); })
+    .catch((e) => { job.status = 'error'; job.error = e.message; });
+  return res.json({ status: 'running', done: 0, total: job.total });
+});
+
+// ───────── Payments: payouts (Payment History) + settlement reports (Invoice Reports) ─────────
+// Parse one CSV line, honouring double-quoted fields (the settlement reports quote names
+// and can contain commas inside quotes).
+function splitCsvLine(line) {
+  const out = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const stripQuote = (s) => String(s == null ? '' : s).replace(/^'/, '').trim();
+// Normalise any date-ish string to YYYY-MM-DD (handles ISO, "YYYY-MM-DD HH:MM", and DD-MM-YYYY).
+const toISODate = (x) => { const s = String(x == null ? '' : x); let m = s.match(/(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`; m = s.match(/(\d{2})-(\d{2})-(\d{4})/); if (m) return `${m[3]}-${m[2]}-${m[1]}`; return ''; };
+const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// Download a signed report/blob URL and parse it into { columns, rows }. Gunzips if needed.
+async function fetchCsvUrl(url) {
+  const dl = await fetch(url);
+  const buf = Buffer.from(await dl.arrayBuffer());
+  let text;
+  try { text = require('zlib').gunzipSync(buf).toString('utf8'); } catch { text = buf.toString('utf8'); }
+  const lines = text.split(/\r?\n/).filter((l) => l.length);
+  if (!lines.length) return { columns: [], rows: [] };
+  return { columns: splitCsvLine(lines[0]), rows: lines.slice(1).map(splitCsvLine) };
+}
+
+// Every (year, month) touched by a yyyy-MM-dd..yyyy-MM-dd range (capped, for safety).
+function monthsInRange(from, to) {
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  const out = [];
+  let y = fy, m = fm;
+  while ((y < ty || (y === ty && m <= tm)) && out.length < 36) {
+    out.push({ year: String(y), month: String(m).padStart(2, '0') });
+    if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+// All payouts for the window across the requested methods, all pages. Myntra intermittently
+// returns payments:[] even when totalElements>0, so we retry a page until it yields (or is
+// genuinely empty). Returns { payments, totals } or throws.
+async function collectPayouts(fromDate, toDate, methods) {
+  const payments = [];
+  const totals = { totalAmount: 0, prepaidAmount: 0, postpaidAmount: 0 };
+  for (const m of methods) {
+    let pageNo = 0, totalPages = 1;
+    do {
+      let d = {};
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const r = await myntraClient.fetchPaymentHistory({ paymentMethod: m, fromDate, toDate, pageNo, pageSize: 100 });
+        const b = r.body || {};
+        if (r.status !== 200 || b.statusType === 'ERROR') throw new Error(b.statusMessage || `Myntra returned ${r.status}.`);
+        d = b.data || {};
+        totalPages = d.totalPages || 1;
+        if ((d.payments || []).length || !(d.totalElements > 0)) break;
+        await sleep(1500); // transient empty page — back off and retry
+      }
+      if (pageNo === 0) {
+        totals.totalAmount += toNum(d.totalAmount);
+        totals.prepaidAmount += toNum(d.prepaidAmount);
+        totals.postpaidAmount += toNum(d.postpaidAmount);
+      }
+      for (const p of d.payments || []) payments.push(p);
+      pageNo++;
+    } while (pageNo < totalPages);
+  }
+  payments.sort((a, b) => String(b.paymentDate || '').localeCompare(String(a.paymentDate || '')));
+  return { payments, totals };
+}
+
+// Payouts: what Myntra actually paid, POSTPAID + PREPAID, across the date window.
+router.get('/orders/api/payments/history', dashboardGate, async (req, res) => {
+  try {
+    const { fromDate, toDate } = req.query;
+    const want = String(req.query.method || 'ALL').toUpperCase();
+    if (!fromDate || !toDate) return res.status(400).json({ ok: false, error: 'fromDate and toDate (yyyy-MM-dd) are required.' });
+    const methods = want === 'ALL' ? ['POSTPAID', 'PREPAID'] : [want];
+    const { payments, totals } = await collectPayouts(fromDate, toDate, methods);
+    return res.json({ ok: true, payments, summary: { ...totals, count: payments.length } });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Settlement report: resolve the signed report URL, download the CSV, and return it parsed
+// into { columns, rows } (plus the raw URL for a full download).
+router.post('/orders/api/payments/report', dashboardGate, async (req, res) => {
+  try {
+    const { reportType = 'MONTHLY_REPORTS', year, month, reportName } = req.body || {};
+    if (!year || !reportName) return res.status(400).json({ ok: false, error: 'year and reportName are required.' });
+    const r = await myntraClient.fetchInvoiceReport({ reportType, year, month, reportName });
+    const b = r.body || {};
+    const entry = (b.data || [])[0];
+    if (b.statusCode === 204 || !entry || !entry.reportPath) {
+      return res.json({ ok: true, found: false, message: b.statusMessage || 'No report found for this selection.' });
+    }
+    const reportPath = entry.reportPath;
+    let columns = [];
+    let rows = [];
+    let truncated = false;
+    try {
+      const dl = await fetch(reportPath);
+      const buf = Buffer.from(await dl.arrayBuffer());
+      let text;
+      try { text = require('zlib').gunzipSync(buf).toString('utf8'); } catch { text = buf.toString('utf8'); }
+      const lines = text.split(/\r?\n/).filter((l) => l.length);
+      if (lines.length) {
+        columns = splitCsvLine(lines[0]);
+        const dataLines = lines.slice(1);
+        const MAX = 1000; // cap in-app render; the raw URL has the full file
+        truncated = dataLines.length > MAX;
+        rows = dataLines.slice(0, MAX).map(splitCsvLine);
+      }
+    } catch { /* still return the URL so the user can download it */ }
+    return res.json({ ok: true, found: true, reportName, reportPath, columns, rows, rowCount: rows.length, truncated });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Reconciliation: for a date window, join what Myntra ACTUALLY paid (per-order settlement
+// from each payout's detail report) against what it SOLD (Sales_Revenue), to show — per
+// order — the sale value, the full deduction breakdown, the net settled, and the effective
+// take-rate; plus orders that sold but haven't hit a payout yet (pending money) and the GST.
+router.get('/orders/api/payments/reconciliation', dashboardGate, async (req, res) => {
+  try {
+    const { fromDate, toDate } = req.query;
+    if (!fromDate || !toDate) return res.status(400).json({ ok: false, error: 'fromDate and toDate (yyyy-MM-dd) are required.' });
+
+    // 1) Actual per-order settlement from every payout's detail report.
+    const { payments } = await collectPayouts(fromDate, toDate, ['POSTPAID', 'PREPAID']);
+    const orders = new Map();
+    let detailErrors = 0;
+    for (const p of payments) {
+      if (!p.utrDetailsLink) continue;
+      let csv;
+      try { csv = await fetchCsvUrl(p.utrDetailsLink); } catch { detailErrors++; continue; }
+      const idx = {}; csv.columns.forEach((c, i) => { idx[c] = i; });
+      const g = (row, name) => (idx[name] != null ? row[idx[name]] : '');
+      for (const row of csv.rows) {
+        const id = stripQuote(g(row, 'seller_order_id')) || stripQuote(g(row, 'order_release_id'));
+        if (!id) continue;
+        let rec = orders.get(id);
+        if (!rec) {
+          rec = {
+            orderId: id, storeOrderId: stripQuote(g(row, 'Store_Order_id')),
+            type: stripQuote(g(row, 'Order_Type')), paymentType: stripQuote(g(row, 'Payment_Type')),
+            date: stripQuote(g(row, 'Payment_Date')), utr: stripQuote(g(row, 'NEFT_Ref')),
+            customerPaid: 0, settled: 0, commission: 0, logistics: 0, fees: 0, tds: 0, marketing: 0, other: 0, gst: 0,
+          };
+          orders.set(id, rec);
+        }
+        rec.customerPaid += toNum(g(row, 'customer_paid_amt'));
+        rec.settled += toNum(g(row, 'Settled_Amount'));
+        rec.commission += toNum(g(row, 'Commission'));
+        rec.logistics += toNum(g(row, 'Logistics_Commission'));
+        rec.fees += toNum(g(row, 'fixed_fee')) + toNum(g(row, 'pick_and_pack_fee')) + toNum(g(row, 'Shipping_Fee')) + toNum(g(row, 'Payment_Gateway_Fee'));
+        rec.tds += toNum(g(row, 'TDS'));
+        rec.marketing += toNum(g(row, 'marketingCharges'));
+        rec.other += toNum(g(row, 'techEnablement')) + toNum(g(row, 'airLogistics')) + toNum(g(row, 'royaltyCharges')) + toNum(g(row, 'fwdAdditionalCharges')) + toNum(g(row, 'rvsAdditionalCharges'));
+        rec.gst += toNum(g(row, 'igst_amount')) + toNum(g(row, 'cgst_amount')) + toNum(g(row, 'sgst_amount'));
+      }
+    }
+    const settled = [...orders.values()].map((o) => ({
+      ...o,
+      customerPaid: round2(o.customerPaid), settled: round2(o.settled), gst: round2(o.gst),
+      commission: round2(o.commission), logistics: round2(o.logistics), fees: round2(o.fees),
+      tds: round2(o.tds), marketing: round2(o.marketing), other: round2(o.other),
+      deductions: round2(o.customerPaid - o.settled),
+      takeRate: o.customerPaid > 0 ? round2((o.customerPaid - o.settled) / o.customerPaid * 100) : 0,
+    })).sort((a, b) => b.settled - a.settled);
+
+    const sum = (f) => settled.reduce((a, o) => a + f(o), 0);
+    const gross = sum((o) => o.customerPaid);
+    const summary = {
+      ordersSettled: settled.length,
+      grossCustomerPaid: round2(gross),
+      netSettled: round2(sum((o) => o.settled)),
+      totalDeductions: round2(sum((o) => o.deductions)),
+      gst: round2(sum((o) => o.gst)),
+      effectiveTakeRate: gross > 0 ? round2(sum((o) => o.deductions) / gross * 100) : 0,
+      breakdown: {
+        commission: round2(sum((o) => o.commission)), logistics: round2(sum((o) => o.logistics)),
+        fees: round2(sum((o) => o.fees)), tds: round2(sum((o) => o.tds)),
+        marketing: round2(sum((o) => o.marketing)), other: round2(sum((o) => o.other)),
+      },
+    };
+
+    // 2) Pending: orders in Sales_Revenue for the covered months that never appear in a
+    // payout yet (settlement lags, so recent sales legitimately show here).
+    const settledIds = new Set(settled.flatMap((o) => [o.orderId, o.storeOrderId].filter(Boolean)));
+    const pendMap = new Map();
+    let salesReportMonths = 0;
+    for (const { year, month } of monthsInRange(fromDate, toDate)) {
+      try {
+        const rep = await myntraClient.fetchInvoiceReport({ reportType: 'MONTHLY_REPORTS', year, month, reportName: 'Sales_Revenue_Packed_B2C' });
+        const entry = (rep.body && rep.body.data || [])[0];
+        if (!entry || !entry.reportPath) continue;
+        const csv = await fetchCsvUrl(entry.reportPath);
+        const idx = {}; csv.columns.forEach((c, i) => { idx[c] = i; });
+        const g = (row, name) => (idx[name] != null ? row[idx[name]] : '');
+        salesReportMonths++;
+        for (const row of csv.rows) {
+          const code = stripQuote(g(row, 'Sale_Order_Code'));
+          const oc = stripQuote(g(row, 'Order_Code'));
+          const key = code || oc;
+          if (!key || settledIds.has(code) || settledIds.has(oc)) continue;
+          const e = pendMap.get(key) || { orderCode: key, amount: 0, month: `${year}-${month}` };
+          e.amount += toNum(g(row, 'Total_Amount'));
+          pendMap.set(key, e);
+        }
+      } catch { /* pending is best-effort per month */ }
+    }
+    const pending = [...pendMap.values()].map((p) => ({ ...p, amount: round2(p.amount) })).sort((a, b) => b.amount - a.amount);
+    const pendingAmount = round2(pending.reduce((a, p) => a + p.amount, 0));
+
+    return res.json({ ok: true, summary, settled, pending, pendingAmount, notes: { detailErrors, salesReportMonths } });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// The settlement reports only carry Myntra's vendor code (ALJE…); the friendly seller SKU
+// (e.g. Earrings565 — which has a product image) lives on the live order, reachable via the
+// row's seller_order_id (a UUID). Resolve + cache it so the financial rows can show thumbnails.
+const sellerSkuCache = new Map();
+// Myntra vendor SKU (e.g. ALJEAEARR132726470) → friendly seller SKU (Earrings675). Built from
+// any order that resolves both; lets completed orders (whose live detail is empty) still show a
+// friendly SKU + image by reusing the mapping from another order of the same style.
+const vendorToFriendly = new Map();
+async function resolveSellerSkus(ids) {
+  const todo = [...new Set(ids)].filter((id) => id && !sellerSkuCache.has(id));
+  for (let i = 0; i < todo.length; i += 8) {
+    await Promise.all(todo.slice(i, i + 8).map(async (id) => {
+      try {
+        const d = await myntraClient.fetchOrderById(id);
+        const lines = (d.body && (d.body.orderLineEntries || d.body.orderLines)) || [];
+        sellerSkuCache.set(id, lines[0] && lines[0].sku ? String(lines[0].sku) : '');
+      } catch { sellerSkuCache.set(id, ''); }
+    }));
+  }
+}
+
+// COGS (cost per seller SKU) is the one thing the marketplace feed can't give us — the
+// seller enters it, exactly like Amazon/Flipkart in SmartCommerce. Persisted to a file.
+const COGS_FILE = path.join(__dirname, '../../data/sku_cogs.json');
+function loadCogs() { try { return JSON.parse(fs.readFileSync(COGS_FILE, 'utf8')) || {}; } catch { return {}; } }
+
+router.get('/orders/api/financials/cogs', dashboardGate, (_req, res) => res.json({ ok: true, cogs: loadCogs() }));
+router.post('/orders/api/financials/cogs', dashboardGate, (req, res) => {
+  try {
+    const items = Array.isArray(req.body && req.body.items) ? req.body.items : [];
+    const map = loadCogs();
+    let updated = 0;
+    for (const it of items) {
+      const sku = String(it.sku || '').trim();
+      const cost = Number(it.cost);
+      if (sku && Number.isFinite(cost) && cost >= 0) { map[sku] = round2(cost); updated++; }
+    }
+    fs.writeFileSync(COGS_FILE, JSON.stringify(map));
+    return res.json({ ok: true, updated, count: Object.keys(map).length });
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+
+// Pull COGS from Alya's own price API into the COGS file (defensive — parses common
+// JSON shapes). Shared by the scheduled auto-sync below and the manual sync route.
+// Returns { ok, synced, count } or { ok:false, error }; never throws on bad payloads.
+async function syncAlyaCogs() {
+  const r = await fetch('https://alyajewels.com/api/get-all-product-prices', { headers: { Accept: 'application/json' } });
+  const text = await r.text();
+  let json;
+  try { json = JSON.parse(text); } catch { return { ok: false, error: 'Alya API is not returning JSON right now (server error on alyajewels.com).' }; }
+  // Reject Laravel/error payloads outright so we never parse "line: 281" as a price.
+  if (json && !Array.isArray(json) && (json.exception || json.trace || json.message || json.error)) {
+    return { ok: false, error: 'Alya API returned an error: ' + String(json.message || json.error || 'server error').slice(0, 120) };
+  }
+  const map = {};
+  const addByKey = (key, price) => { const k = String(key == null ? '' : key).trim(); const c = Number(price); if (k && Number.isFinite(c) && c >= 0) map[k] = round2(c); };
+  // Only trust explicit array/container shapes — never a bare object (could be an error).
+  let items = null;
+  if (Array.isArray(json)) items = json;
+  else if (json && Array.isArray(json.data)) items = json.data;
+  else if (json && Array.isArray(json.prices)) items = json.prices;
+  else if (json && Array.isArray(json.products)) items = json.products;
+  // Alya keys each cost by the SKU number (its `id`) — e.g. Earrings632 → id 632. Store it
+  // by that number; the financials match by stripping the prefix off the seller SKU. If the
+  // API ever adds a `sku` field, we prefer that.
+  if (items) for (const it of items) { if (it && typeof it === 'object') { const sku = it.sku ?? it.SKU ?? it.product_sku ?? it.code; addByKey((sku != null && String(sku).trim()) ? sku : it.id, it.cost ?? it.cost_price ?? it.costPrice ?? it.price ?? it.mrp); } }
+  if (!Object.keys(map).length) {
+    const fields = items && items[0] && typeof items[0] === 'object' ? Object.keys(items[0]).join(', ') : '';
+    const msg = items && items.length
+      ? `Alya returned ${items.length} costs but no SKU to map them to (fields: ${fields}). Ask Alya to add the seller SKU (e.g. Earrings632) to each item.`
+      : 'No usable prices in the Alya response.';
+    return { ok: false, error: msg };
+  }
+  const merged = { ...loadCogs(), ...map };
+  fs.writeFileSync(COGS_FILE, JSON.stringify(merged));
+  return { ok: true, synced: Object.keys(map).length, count: Object.keys(merged).length };
+}
+
+// Manual trigger kept for debugging/ops; the UI no longer surfaces it (auto-synced instead).
+router.post('/orders/api/financials/cogs/sync-alya', dashboardGate, async (_req, res) => {
+  try {
+    const out = await syncAlyaCogs();
+    return res.status(out.ok ? 200 : 502).json(out);
+  } catch (error) { return res.status(502).json({ ok: false, error: 'Could not reach Alya API: ' + error.message }); }
+});
+
+// Automatic COGS sync — pull cost prices from Alya on boot and on a fixed interval, so
+// profit/margin stay current with no manual action. Interval configurable (default 6h).
+const COGS_SYNC_INTERVAL_MS = Number(process.env.COGS_SYNC_INTERVAL_MS) || 6 * 60 * 60 * 1000;
+function startCogsAutoSync() {
+  const run = async () => {
+    try {
+      const out = await syncAlyaCogs();
+      if (out.ok) console.log(`[COGS_SYNC] pulled ${out.synced} SKU costs from Alya (${out.count} total).`);
+      else console.warn('[COGS_SYNC] skipped: ' + out.error);
+    } catch (error) { console.warn('[COGS_SYNC] failed: ' + error.message); }
+  };
+  run(); // once on boot
+  const timer = setInterval(run, COGS_SYNC_INTERVAL_MS);
+  if (typeof timer.unref === 'function') timer.unref(); // don't hold the event loop open
+  return timer;
+}
+router.startCogsAutoSync = startCogsAutoSync;
+
+// Which recent months actually have a settlement report (so the UI can land on real data).
+let finMonthsCache = null;
+router.get('/orders/api/financials/months', dashboardGate, async (_req, res) => {
+  try {
+    if (finMonthsCache && Date.now() - finMonthsCache.at < 10 * 60 * 1000) return res.json({ ok: true, months: finMonthsCache.months });
+    const list = [];
+    let y = new Date().getFullYear(), m = new Date().getMonth() + 1;
+    for (let i = 0; i < 12; i++) { list.push({ year: String(y), month: String(m).padStart(2, '0') }); if (--m < 1) { m = 12; y--; } }
+    const found = [];
+    for (let i = 0; i < list.length; i += 6) {
+      await Promise.all(list.slice(i, i + 6).map(async ({ year, month }) => {
+        try { const r = await myntraClient.fetchInvoiceReport({ reportType: 'MONTHLY_REPORTS', year, month, reportName: 'PG_Forward_Settled' }); if ((r.body && r.body.data || [])[0] && r.body.data[0].reportPath) found.push(`${year}-${month}`); } catch { /* skip */ }
+      }));
+    }
+    found.sort().reverse();
+    finMonthsCache = { at: Date.now(), months: found };
+    return res.json({ ok: true, months: found });
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+
+// Map of seller_order_id → delivery date (YYYY-MM-DD) for every order in ANY forward-
+// settlement report (last 12 months). The keys double as the "is settled?" set.
+let settledIdsCache = null;
+async function settledSellerOrderIds() {
+  if (settledIdsCache && Date.now() - settledIdsCache.at < 10 * 60 * 1000) return settledIdsCache.map;
+  const map = new Map();
+  let y = new Date().getFullYear(), m = new Date().getMonth() + 1;
+  const list = [];
+  for (let i = 0; i < 12; i++) { list.push([String(y), String(m).padStart(2, '0')]); if (--m < 1) { m = 12; y--; } }
+  for (let i = 0; i < list.length; i += 6) {
+    await Promise.all(list.slice(i, i + 6).map(async ([yy, mm]) => {
+      try {
+        const r = await myntraClient.fetchInvoiceReport({ reportType: 'MONTHLY_REPORTS', year: yy, month: mm, reportName: 'PG_Forward_Settled' });
+        const d = (r.body && r.body.data || [])[0]; if (!d || !d.reportPath) return;
+        const csv = await fetchCsvUrl(d.reportPath);
+        const iSid = csv.columns.indexOf('seller_order_id');
+        const iDel = csv.columns.indexOf('delivery_date');
+        const iPack = csv.columns.indexOf('packing_date');
+        if (iSid >= 0) for (const row of csv.rows) { const v = stripQuote(row[iSid]); if (v && !map.has(v)) map.set(v, toISODate(row[iDel] || row[iPack])); }
+      } catch { /* skip month */ }
+    }));
+  }
+  if (map.size) settledIdsCache = { at: Date.now(), map }; // never cache a failed/empty fetch
+  return map;
+}
+
+// Date + value + SKU for EVERY packed order (settled or not), from the Sales report —
+// the only live source that dates completed orders, whose order-detail comes back empty.
+// Lets "settled through / next awaiting" work once delivered orders age into Completed.
+let packedMetaCache = null;
+async function packedOrderMeta() {
+  if (packedMetaCache && Date.now() - packedMetaCache.at < 10 * 60 * 1000) return packedMetaCache.map;
+  const map = new Map();
+  let y = new Date().getFullYear(), m = new Date().getMonth() + 1;
+  const list = [];
+  for (let i = 0; i < 12; i++) { list.push([String(y), String(m).padStart(2, '0')]); if (--m < 1) { m = 12; y--; } }
+  for (let i = 0; i < list.length; i += 6) {
+    await Promise.all(list.slice(i, i + 6).map(async ([yy, mm]) => {
+      try {
+        const r = await myntraClient.fetchInvoiceReport({ reportType: 'MONTHLY_REPORTS', year: yy, month: mm, reportName: 'Sales_Revenue_Packed_B2C' });
+        const d = (r.body && r.body.data || [])[0]; if (!d || !d.reportPath) return;
+        const csv = await fetchCsvUrl(d.reportPath);
+        const iSid = csv.columns.indexOf('Seller_Order_Id');
+        const iDate = csv.columns.indexOf('Order_Created_Date');
+        const iPack = csv.columns.indexOf('Packing_Date');
+        const iAmt = csv.columns.indexOf('Total_Amount');
+        const iSku = csv.columns.indexOf('SKU_Code');
+        if (iSid >= 0) for (const row of csv.rows) { const v = stripQuote(row[iSid]); if (v && !map.has(v)) map.set(v, { date: toISODate(row[iDate] || row[iPack]), value: round2(Number(stripQuote(row[iAmt])) || 0), sku: stripQuote(row[iSku]) || '' }); }
+      } catch { /* skip month */ }
+    }));
+  }
+  if (map.size) packedMetaCache = { at: Date.now(), map }; // never cache a failed/empty fetch
+  return map;
+}
+
+// Awaiting settlement — the Amazon "delivered, pending settlement" model, driven by the
+// LIVE order list (same source as the Orders page). Delivered/completed orders that don't
+// yet appear in any settlement report = money owed but not paid. Cached (it's expensive).
+let awaitingCache = null;
+router.get('/orders/api/financials/awaiting', dashboardGate, async (_req, res) => {
+  try {
+    if (awaitingCache && Date.now() - awaitingCache.at < 10 * 60 * 1000) return res.json({ ok: true, ...awaitingCache.data });
+    // 1) All live orders (dedupe by sellerOrderId).
+    const bySid = new Map();
+    const collect = (body) => { for (const o of (body && body.data || [])) for (const l of (o.orderLines || [])) { const sid = l.sellerOrderId && String(l.sellerOrderId); if (sid && !bySid.has(sid)) { const dt = pickDate(l, o); bySid.set(sid, { sid, status: String(l.status || '').toUpperCase(), orderId: o.orderId, date: dt ? dt.toISOString().slice(0, 10) : null }); } } };
+    const first = await myntraClient.fetchOrderList({ page: 0 });
+    collect(first.body);
+    const pages = Math.min((first.body && first.body.pages) || 1, 15);
+    const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, i) => myntraClient.fetchOrderList({ page: i + 1 })));
+    rest.forEach((r) => collect(r.body));
+    // Delivered/completed candidates (blank status = completed); exclude cancelled + in-progress.
+    const done = [...bySid.values()].filter((l) => l.status === 'DL' || l.status === '' || l.status === 'C');
+    // 2) Drop anything already in a settlement report.
+    const [settled, packed] = await Promise.all([settledSellerOrderIds(), packedOrderMeta()]);
+    const awaitingSids = done.filter((l) => !settled.has(l.sid));
+    // Seed vendor→friendly from settled orders (their live detail usually still resolves), so a
+    // completed awaiting order of the same style can be back-filled from its vendor code.
+    await resolveSellerSkus([...settled.keys()]);
+    for (const sid of settled.keys()) { const f = sellerSkuCache.get(sid); const m = packed.get(sid); if (f && m && m.sku) vendorToFriendly.set(m.sku, f); }
+    // 3) Fetch detail (bounded) for value + SKU.
+    const CAP = 120;
+    const slice = awaitingSids.slice(0, CAP);
+    const detailed = [];
+    for (let i = 0; i < slice.length; i += 8) {
+      await Promise.all(slice.slice(i, i + 8).map(async (l) => {
+        const meta = packed.get(l.sid) || {};
+        try {
+          const d = await myntraClient.fetchOrderById(l.sid);
+          const les = (d.body && d.body.orderLineEntries) || [];
+          const value = les.reduce((s, x) => s + (Number(x.lineSellerFinalAmount) || 0), 0);
+          const friendly = (les[0] && les[0].sku) || '';
+          if (friendly && meta.sku) vendorToFriendly.set(meta.sku, friendly); // learn the mapping
+          // Completed orders come back empty — fall back to the Sales report for date/value/SKU.
+          detailed.push({ sellerOrderId: l.sid, orderId: String(l.orderId || ''), sku: friendly || meta.sku || '', vendorSku: meta.sku || '', value: round2(value > 0 ? value : (meta.value || 0)), status: l.status || 'C', invoiceDate: toISODate(les[0] && les[0].invoiceDate) || meta.date || l.date || null });
+        } catch { detailed.push({ sellerOrderId: l.sid, orderId: String(l.orderId || ''), sku: meta.sku || '', vendorSku: meta.sku || '', value: meta.value || 0, status: l.status || 'C', invoiceDate: meta.date || l.date || null }); }
+      }));
+    }
+    // Backfill vendor-code SKUs (completed orders) with the friendly name from any order of the
+    // same style that resolved — this run or a prior month statement.
+    for (const o of detailed) { if (o.sku && o.vendorSku && o.sku === o.vendorSku) { const f = vendorToFriendly.get(o.vendorSku); if (f) o.sku = f; } }
+    detailed.sort((a, b) => b.value - a.value);
+    // finalized-through = the boundary before the FIRST unsettled order (dashboardweb's
+    // finalized_till_date rule: settled up to the day before the earliest still-open order).
+    // Completed orders return no line detail, so their date comes from the live order LIST
+    // (shipByTime/createdOn via pickDate) — without that fallback the boundary would wrongly
+    // read "up to date" the moment delivered orders age into the Completed state.
+    const awaitDates = detailed.map((x) => x.invoiceDate).filter((v) => v && /^\d{4}-\d{2}-\d{2}$/.test(v)).sort();
+    const firstUnsettled = awaitDates[0] || null;
+    let finalizedThrough = null;
+    if (firstUnsettled) { const dt = new Date(firstUnsettled + 'T00:00:00'); if (!Number.isNaN(dt.getTime())) { dt.setDate(dt.getDate() - 1); finalizedThrough = dt.toISOString().slice(0, 10); } }
+
+    // Per-month order lifecycle keyed by the order's OWN (delivery/invoice) date, not the
+    // disbursement month — so "May" = every order from May with a settled/not-settled split.
+    const byMonth = {};
+    const bump = (mo, key, val) => { if (!/^\d{4}-\d{2}$/.test(mo || '')) return; const b = byMonth[mo] || (byMonth[mo] = { total: 0, settled: 0, awaiting: 0, awaitingValue: 0 }); b.total++; b[key]++; if (key === 'awaiting') b.awaitingValue = round2(b.awaitingValue + (val || 0)); };
+    for (const [, dstr] of settled.entries()) bump((dstr || '').slice(0, 7), 'settled');
+    for (const o of detailed) bump((o.invoiceDate || '').slice(0, 7), 'awaiting', o.value);
+
+    const data = { awaiting: detailed, count: awaitingSids.length, shown: detailed.length, totalValue: round2(detailed.reduce((s, x) => s + x.value, 0)), settledOrders: settled.size, firstUnsettled, finalizedThrough, byMonth };
+    if (settled.size) awaitingCache = { at: Date.now(), data }; // don't cache a run where the settled fetch failed
+    return res.json({ ok: true, ...data });
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+
+// Full monthly financial statement, built from the settlement reports: forward
+// (PG_Forward_Settled — per order-line sales settlement with every fee, tax, and the
+// expected/actual/pending split), reverse (PG_Reverse_Settled — returns), and
+// Non_Order_Deduction_Settled. One call → the whole P&L for a month.
+router.get('/orders/api/financials', dashboardGate, async (req, res) => {
+  try {
+    const year = String(req.query.year || '');
+    const month = String(req.query.month || '');
+    // month=all → aggregate every settlement month into one statement (rolling 12 months).
+    const ALL = month === 'all';
+    if (!ALL && (!/^\d{4}$/.test(year) || !/^(0[1-9]|1[0-2])$/.test(month))) {
+      return res.status(400).json({ ok: false, error: 'year (YYYY) and month (MM) are required.' });
+    }
+    const abs = (v) => Math.abs(toNum(v));
+    const fetchReport = async (yy, mm, name) => {
+      const r = await myntraClient.fetchInvoiceReport({ reportType: 'MONTHLY_REPORTS', year: yy, month: mm, reportName: name });
+      const entry = (r.body && r.body.data || [])[0];
+      if (!entry || !entry.reportPath) return { columns: [], rows: [], found: false };
+      try { return { ...(await fetchCsvUrl(entry.reportPath)), found: true }; } catch { return { columns: [], rows: [], found: false }; }
+    };
+    async function loadReport(name) {
+      if (!ALL) return fetchReport(year, month, name);
+      // Concatenate rows across the rolling 12-month window — same columns each month, so the
+      // rest of the handler aggregates the combined set exactly like a single month.
+      let yy = new Date().getFullYear(), mm = new Date().getMonth() + 1;
+      const months = [];
+      for (let i = 0; i < 12; i++) { months.push([String(yy), String(mm).padStart(2, '0')]); if (--mm < 1) { mm = 12; yy--; } }
+      const parts = await Promise.all(months.map(([y2, m2]) => fetchReport(y2, m2, name)));
+      const hit = parts.filter((p) => p.found);
+      if (!hit.length) return { columns: [], rows: [], found: false };
+      return { columns: hit[0].columns, rows: hit.flatMap((p) => p.rows), found: true };
+    }
+    const mkGet = (cols) => { const idx = {}; cols.forEach((c, i) => { idx[String(c).trim()] = i; }); return (row, name) => (idx[name] != null ? row[idx[name]] : ''); };
+
+    const [fwd, rev, nod] = await Promise.all([loadReport('PG_Forward_Settled'), loadReport('PG_Reverse_Settled'), loadReport('Non_Order_Deduction_Settled')]);
+
+    // Forward settlement — per order line.
+    const fg = mkGet(fwd.columns);
+    const orders = fwd.rows.map((r) => {
+      const sellerAmount = toNum(fg(r, 'seller_product_amount'));
+      const netSettled = toNum(fg(r, 'total_actual_settlement'));
+      return {
+        orderId: stripQuote(fg(r, 'order_release_id')), sellerOrderId: stripQuote(fg(r, 'seller_order_id')),
+        sku: stripQuote(fg(r, 'sku_code')), sellerSku: '',
+        article: stripQuote(fg(r, 'article_type')) || 'Other', brand: stripQuote(fg(r, 'brand')),
+        category: stripQuote(fg(r, 'product_tax_category')),
+        customerPaid: round2(toNum(fg(r, 'customer_paid_amt'))),
+        sellerAmount: round2(sellerAmount),
+        commission: round2(abs(fg(r, 'total_commission_plus_tcs_tds_deduction'))),
+        commissionBase: round2(abs(fg(r, 'total_commission'))),
+        logistics: round2(abs(fg(r, 'total_logistics_deduction'))),
+        shippingFee: round2(abs(fg(r, 'shipping_fee'))), fixedFee: round2(abs(fg(r, 'fixed_fee'))),
+        pickPackFee: round2(abs(fg(r, 'pick_and_pack_fee'))), pgFee: round2(abs(fg(r, 'payment_gateway_fee'))),
+        platformFees: round2(abs(fg(r, 'platform_fees'))),
+        marketing: round2(abs(fg(r, 'marketingCharges_prepaid')) + abs(fg(r, 'marketingCharges_postpaid'))),
+        tcs: round2(abs(fg(r, 'tcs_amount'))), tds: round2(abs(fg(r, 'tds_amount'))),
+        igst: toNum(fg(r, 'igst_amount')), cgst: toNum(fg(r, 'cgst_amount')), sgst: toNum(fg(r, 'sgst_amount')),
+        gst: round2(toNum(fg(r, 'igst_amount')) + toNum(fg(r, 'cgst_amount')) + toNum(fg(r, 'sgst_amount'))),
+        taxable: round2(toNum(fg(r, 'taxable_amount'))),
+        netSettled: round2(netSettled), pending: round2(toNum(fg(r, 'amount_pending_settlement'))),
+        deliveredDate: stripQuote(fg(r, 'delivery_date')).slice(0, 10),
+        packetId: stripQuote(fg(r, 'packet_id')), invoiceNumber: stripQuote(fg(r, 'invoice_number')),
+        settlementUtr: stripQuote(fg(r, 'bank_utr_no_postpaid_payment')) || stripQuote(fg(r, 'bank_utr_no_prepaid_payment')),
+        settlementDate: (stripQuote(fg(r, 'settlement_date_postpaid_payment')) || stripQuote(fg(r, 'settlement_date_prepaid_payment'))).slice(0, 10),
+        cogs: 0, profit: 0, margin: 0,
+      };
+    });
+
+    // Reverse settlement — returns.
+    const rg = mkGet(rev.columns);
+    const returns = rev.rows.map((r) => ({
+      orderId: stripQuote(rg(r, 'order_release_id')), sellerOrderId: stripQuote(rg(r, 'seller_order_id')),
+      sku: stripQuote(rg(r, 'sku_code')), sellerSku: '',
+      article: stripQuote(rg(r, 'article_type')) || 'Other', returnType: stripQuote(rg(r, 'return_type')),
+      returnDate: stripQuote(rg(r, 'return_date')).slice(0, 10),
+      reverseAmount: round2(toNum(rg(r, 'total_actual_settlement'))),
+      commission: round2(abs(rg(r, 'total_commission_plus_tcs_tds_deduction'))),
+      logistics: round2(abs(rg(r, 'total_logistics_deduction'))),
+    }));
+
+    // Non-order deductions.
+    const ng = mkGet(nod.columns);
+    const nonOrder = nod.rows.map((r) => ({
+      type: stripQuote(ng(r, 'Settlement_Type')), amount: round2(toNum(ng(r, 'Settlement_Amount'))),
+      description: stripQuote(ng(r, 'Settlement_Description')), utr: stripQuote(ng(r, 'UTR')), date: stripQuote(ng(r, 'Settlement_Date')).slice(0, 10),
+    }));
+
+    // Attach friendly seller SKUs (for thumbnails) from the live orders, and COGS/profit.
+    await resolveSellerSkus([...orders.map((o) => o.sellerOrderId), ...returns.map((r) => r.sellerOrderId)]);
+    const cogsMap = loadCogs();
+    const skuNum = (sku) => { const m = String(sku).match(/(\d+)\s*$/); return m ? m[1] : ''; };
+    for (const o of orders) {
+      o.sellerSku = sellerSkuCache.get(o.sellerOrderId) || '';
+      if (o.sku && o.sellerSku) vendorToFriendly.set(o.sku, o.sellerSku); // learn vendor→friendly
+      const cost = Number(cogsMap[o.sellerSku] ?? cogsMap[skuNum(o.sellerSku)]) || 0;
+      o.cogs = round2(cost); o.profit = round2(o.netSettled - cost);
+      o.margin = o.sellerAmount > 0 ? round2(o.profit / o.sellerAmount * 100) : 0;
+    }
+    for (const r of returns) r.sellerSku = sellerSkuCache.get(r.sellerOrderId) || '';
+
+    const sum = (arr, f) => round2(arr.reduce((a, x) => a + f(x), 0));
+    const sellerValue = sum(orders, (o) => o.sellerAmount);
+    const netForward = sum(orders, (o) => o.netSettled);
+    const grossCustomerPaid = sum(orders, (o) => o.customerPaid);
+    const returnsAbs = sum(returns, (r) => Math.abs(r.reverseAmount));
+    const nonOrderNet = sum(nonOrder, (n) => n.amount);
+    const totalDeductions = round2(sellerValue - netForward);
+
+    const byArticle = [...orders.reduce((m, o) => {
+      const a = m.get(o.article) || { article: o.article, units: 0, sales: 0, netSettled: 0, deductions: 0 };
+      a.units += 1; a.sales += o.sellerAmount; a.netSettled += o.netSettled; a.deductions += (o.sellerAmount - o.netSettled);
+      return m.set(o.article, a), m;
+    }, new Map()).values()].map((a) => ({
+      ...a, sales: round2(a.sales), netSettled: round2(a.netSettled), deductions: round2(a.deductions),
+      takeRate: a.sales > 0 ? round2((a.sales - a.netSettled) / a.sales * 100) : 0,
+    })).sort((x, y) => y.sales - x.sales);
+
+    const totalCogs = sum(orders, (o) => o.cogs);
+    const cogsKnown = orders.some((o) => o.cogs > 0);
+    const summary = {
+      grossCustomerPaid, sellerValue, netForward,
+      pending: sum(orders, (o) => o.pending),
+      returns: returnsAbs, nonOrder: nonOrderNet,
+      netReceivable: round2(netForward - returnsAbs + nonOrderNet),
+      totalDeductions, takeRate: sellerValue > 0 ? round2(totalDeductions / sellerValue * 100) : 0,
+      orderCount: orders.length, returnCount: returns.length,
+      gst: sum(orders, (o) => o.gst), taxable: sum(orders, (o) => o.taxable),
+      cogs: totalCogs, cogsKnown,
+      grossProfit: round2(netForward - totalCogs),
+      marginPct: sellerValue > 0 ? round2((netForward - totalCogs) / sellerValue * 100) : 0,
+    };
+
+    // Settlements grouped by the paying bank UTR (the "settlements timeline").
+    const utrMap = new Map();
+    for (const o of orders) {
+      if (!o.settlementUtr) continue;
+      const a = utrMap.get(o.settlementUtr) || { utr: o.settlementUtr, date: o.settlementDate, orders: 0, netSettled: 0 };
+      a.orders += 1; a.netSettled += o.netSettled;
+      utrMap.set(o.settlementUtr, a);
+    }
+    const settlements = [...utrMap.values()].map((a) => ({ ...a, netSettled: round2(a.netSettled) })).sort((x, y) => String(y.date).localeCompare(String(x.date)));
+    const deductions = {
+      commission: sum(orders, (o) => o.commissionBase),
+      logistics: sum(orders, (o) => o.logistics),
+      platformFees: sum(orders, (o) => o.platformFees),
+      marketing: sum(orders, (o) => o.marketing),
+      tcs: sum(orders, (o) => o.tcs), tds: sum(orders, (o) => o.tds),
+    };
+    const gstBreakdown = { igst: sum(orders, (o) => o.igst), cgst: sum(orders, (o) => o.cgst), sgst: sum(orders, (o) => o.sgst), tcs: sum(orders, (o) => o.tcs) };
+
+    // Fee-type breakdown (for the % bars).
+    const feeBreakdown = [
+      { key: 'commission', label: 'Commission', amount: sum(orders, (o) => o.commissionBase) },
+      { key: 'logistics', label: 'Logistics (total)', amount: sum(orders, (o) => o.logistics) },
+      { key: 'shipping', label: '— Shipping fee', amount: sum(orders, (o) => o.shippingFee), sub: true },
+      { key: 'fixed', label: '— Fixed fee', amount: sum(orders, (o) => o.fixedFee), sub: true },
+      { key: 'pickpack', label: '— Pick & pack', amount: sum(orders, (o) => o.pickPackFee), sub: true },
+      { key: 'pg', label: '— Payment gateway', amount: sum(orders, (o) => o.pgFee), sub: true },
+      { key: 'platform', label: 'Platform fees', amount: sum(orders, (o) => o.platformFees) },
+      { key: 'marketing', label: 'Marketing', amount: sum(orders, (o) => o.marketing) },
+      { key: 'tcs', label: 'TCS', amount: sum(orders, (o) => o.tcs) },
+      { key: 'tds', label: 'TDS', amount: sum(orders, (o) => o.tds) },
+    ].filter((f) => f.amount > 0);
+
+    // Per-SKU performance (join returns by SKU).
+    const skuMap = new Map();
+    for (const o of orders) {
+      const key = o.sellerSku || o.sku;
+      const a = skuMap.get(key) || { sku: key, vendorSku: o.sku, article: o.article, units: 0, sales: 0, netSettled: 0, deductions: 0, cogs: 0, profit: 0, returns: 0, returnUnits: 0 };
+      a.units += 1; a.sales += o.sellerAmount; a.netSettled += o.netSettled; a.deductions += (o.sellerAmount - o.netSettled); a.cogs += o.cogs; a.profit += o.profit;
+      skuMap.set(key, a);
+    }
+    for (const r of returns) { const a = skuMap.get(r.sellerSku || r.sku); if (a) { a.returns += Math.abs(r.reverseAmount); a.returnUnits += 1; } }
+    const bySku = [...skuMap.values()].map((a) => ({
+      ...a, sales: round2(a.sales), netSettled: round2(a.netSettled), deductions: round2(a.deductions), cogs: round2(a.cogs), profit: round2(a.profit), returns: round2(a.returns),
+      takeRate: a.sales > 0 ? round2(a.deductions / a.sales * 100) : 0,
+      margin: a.sales > 0 ? round2(a.profit / a.sales * 100) : 0,
+      returnRate: a.units > 0 ? round2(a.returnUnits / a.units * 100) : 0,
+    })).sort((x, y) => y.netSettled - x.netSettled);
+
+    // Settled vs pending lifecycle.
+    const settledO = orders.filter((o) => o.pending <= 0);
+    const pendingO = orders.filter((o) => o.pending > 0);
+    const lifecycle = {
+      settledCount: settledO.length, pendingCount: pendingO.length,
+      settledAmount: sum(settledO, (o) => o.netSettled), pendingAmount: sum(pendingO, (o) => o.pending),
+      settledRate: orders.length ? round2(settledO.length / orders.length * 100) : 0,
+    };
+
+    // Daily series (by delivery / return date).
+    const dayMap = new Map();
+    const dayOf = (d) => { const a = dayMap.get(d) || { date: d, sales: 0, deductions: 0, net: 0, returns: 0 }; dayMap.set(d, a); return a; };
+    for (const o of orders) { if (!o.deliveredDate) continue; const a = dayOf(o.deliveredDate); a.sales += o.sellerAmount; a.deductions += (o.sellerAmount - o.netSettled); a.net += o.netSettled; }
+    for (const r of returns) { if (!r.returnDate) continue; dayOf(r.returnDate).returns += Math.abs(r.reverseAmount); }
+    const daily = [...dayMap.values()].map((a) => ({ date: a.date, sales: round2(a.sales), deductions: round2(a.deductions), net: round2(a.net), returns: round2(a.returns) })).sort((x, y) => x.date.localeCompare(y.date));
+
+    // Root-cause insights (SmartCommerce parity).
+    const insights = [];
+    if (summary.takeRate > 25) insights.push({ tone: 'warning', title: 'High marketplace take-rate', detail: `Myntra kept ${summary.takeRate}% of sales value this month.` });
+    if (summary.orderCount > 0) { const rr = round2(summary.returnCount / summary.orderCount * 100); if (rr >= 15) insights.push({ tone: 'warning', title: 'Elevated returns', detail: `${rr}% of orders returned (${summary.returnCount}/${summary.orderCount}).` }); }
+    if (summary.pending > 0) insights.push({ tone: 'info', title: 'Money awaiting disbursal', detail: `Rs ${summary.pending} is settled but not yet paid out.` });
+    if (!cogsKnown) insights.push({ tone: 'info', title: 'COGS not set', detail: 'Enter cost per SKU to unlock real profit & margin.' });
+    else { const loss = bySku.filter((sk) => sk.profit < 0).sort((a, b) => a.profit - b.profit)[0]; if (loss) insights.push({ tone: 'critical', title: `Loss-making: ${loss.sku}`, detail: `Net Rs ${loss.netSettled} vs COGS Rs ${loss.cogs} = Rs ${loss.profit}.` }); }
+
+    return res.json({
+      ok: true, year, month,
+      found: { forward: fwd.found, reverse: rev.found, nonOrder: nod.found },
+      summary, deductions, gstBreakdown, feeBreakdown, lifecycle, daily, settlements, insights, byArticle, bySku,
+      orders: orders.sort((a, b) => b.netSettled - a.netSettled),
+      returns, nonOrder,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // ───────── Inbox: orders & returns Myntra PUSHED to our webhook (local store) ─────────
 // Real-time work queue, independent of getOrderList. Status-change actions still hit the
 // live Myntra API (these are real Myntra orders) via /orders/api/action.
 router.get('/orders/api/inbox/list', dashboardGate, async (req, res) => {
   const wanted = req.query.statusCode ? String(req.query.statusCode).toUpperCase() : null;
-  let live = new Map();
-  try { live = await liveStatusMap(); } catch { /* fall back to cached webhook status */ }
+  let kept = [];
+  try { kept = await resolveInbox(); } catch { /* fall back to an empty inbox on error */ }
+  // Map of the resolved (authoritative) status per kept order, for display.
+  const codeMap = new Map(kept.map((k) => [String(k.o.sellerOrderId), k.code]));
   const orders = [];
-  for (const o of db.orders.values()) {
-    if (!isPush(o)) continue;
-    // Only keep orders that are still in progress; clear the rest from the Inbox.
-    if (!isInboxInProgress(o, live)) continue;
-    const s = inboxSummary(o, live);
+  for (const { o } of kept) {
+    const s = inboxSummary(o, codeMap);
     if (wanted && s.orderLines[0] && s.orderLines[0].status !== wanted) continue;
     orders.push(s);
   }
@@ -809,9 +1684,9 @@ router.get('/orders/api/inbox/list', dashboardGate, async (req, res) => {
 router.get('/orders/api/inbox/detail/:sellerOrderId', dashboardGate, async (req, res) => {
   const o = db.orders.get(req.params.sellerOrderId);
   if (!o || !isPush(o)) return res.json({ ok: false, error: 'Order not found in inbox' });
-  let live = new Map();
-  try { live = await liveStatusMap(); } catch { /* fall back to cached webhook status */ }
-  res.json({ ok: true, detail: inboxDetail(o, live) });
+  let inProg = new Map();
+  try { inProg = await inProgressStatusMap(); } catch { /* fall back to cached webhook status */ }
+  res.json({ ok: true, detail: inboxDetail(o, inProg) });
 });
 
 // Inbox documents are served from the LOCAL store (these packets aren't in Myntra).

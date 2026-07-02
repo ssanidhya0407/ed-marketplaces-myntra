@@ -10,6 +10,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Session secret must be present at build time: the auth middleware runs in the
+# Edge runtime, so process.env.OMS_SESSION_SECRET is inlined during `next build`.
+# Must match the backend's OMS_SESSION_SECRET. Rebuild to rotate it.
+ARG OMS_SESSION_SECRET
+ENV OMS_SESSION_SECRET=$OMS_SESSION_SECRET
 RUN npm run build
 
 # ---- runtime ----

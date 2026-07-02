@@ -16,3 +16,13 @@ export function formatDate(value: string | null | undefined): string {
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
 }
+
+// Newest-first ordering. The list summary carries no order date, but Myntra allocates
+// orderId sequentially, so a descending numeric orderId is a reliable recency proxy.
+export function sortByNewest<T extends { orderId: number | string }>(orders: T[]): T[] {
+  return [...orders].sort((a, b) => {
+    const na = Number(a.orderId); const nb = Number(b.orderId);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return nb - na;
+    return String(b.orderId).localeCompare(String(a.orderId));
+  });
+}

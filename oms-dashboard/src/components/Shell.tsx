@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Package, Sparkles, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes, LayoutDashboard, Percent, BarChart3, LogOut, PanelLeft, PanelLeftClose } from 'lucide-react';
+import { Package, Bell, ShoppingBag, Check, X, Inbox, Undo2, Boxes, Landmark, LayoutDashboard, Percent, BarChart3, LogOut, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { useNotifications } from './NotificationProvider';
 import MyntraLogo from './MyntraLogo';
 import { cx } from '@/lib/utils';
@@ -11,12 +11,12 @@ import { cx } from '@/lib/utils';
 const NAV = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/orders', label: 'All Orders', icon: Package },
-  { href: '/orders/new', label: 'New Orders', icon: Sparkles },
   { href: '/inbox', label: 'Inbox', icon: Inbox },
   { href: '/returns', label: 'Returns', icon: Undo2 },
   { href: '/inventory', label: 'Inventory', icon: Boxes },
   { href: '/discounts', label: 'Discounts', icon: Percent },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
+  { href: '/financials', label: 'Financials', icon: Landmark },
 ];
 
 function NotificationBell() {
@@ -96,21 +96,15 @@ function AccountMenu() {
     window.location.href = '/login';
   }
 
-  const initial = (email || 'E').trim().charAt(0).toUpperCase();
   return (
-    <div className="flex items-center gap-2">
-      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm ring-2 ring-white ring-offset-1 ring-offset-[#FAF9F6]" title={email || undefined}>
-        <span className="text-white text-[11px] font-bold">{initial}</span>
-      </div>
-      <button
-        onClick={logout}
-        disabled={busy}
-        title={email ? `Sign out (${email})` : 'Sign out'}
-        className="p-2 text-zinc-400 hover:text-rose-600 hover:bg-white rounded-xl transition-all disabled:opacity-60"
-      >
-        <LogOut size={16} />
-      </button>
-    </div>
+    <button
+      onClick={logout}
+      disabled={busy}
+      title={email ? `Sign out (${email})` : 'Sign out'}
+      className="p-2 text-zinc-400 hover:text-rose-600 hover:bg-white rounded-xl transition-all disabled:opacity-60"
+    >
+      <LogOut size={16} />
+    </button>
   );
 }
 

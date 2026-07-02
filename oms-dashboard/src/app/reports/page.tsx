@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   RefreshCw, FileSpreadsheet, Download, TrendingUp, TrendingDown, ShoppingBag, Boxes,
-  Coins, Undo2, Ban, Layers, MapPin, CreditCard, AlertTriangle, Loader2, Gauge, Package,
+  Coins, Undo2, Ban, Layers, MapPin, CreditCard, AlertTriangle, Loader2, Gauge, Package, PackageX,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api, type SalesReport, type SkuRow } from '@/lib/api';
@@ -54,6 +54,9 @@ export default function ReportsPage() {
       { Metric: 'Cancel Rate %', Value: s.cancelRate },
       { Metric: 'Return Count', Value: s.returnCount },
       { Metric: 'Return Rate %', Value: s.returnRate },
+      { Metric: 'Post-Delivery Returns', Value: s.postDeliveryReturns },
+      { Metric: 'Post-Delivery Return Value', Value: s.postDeliveryReturnValue },
+      { Metric: 'Post-Delivery Return Rate %', Value: s.postDeliveryReturnRate },
       { Metric: 'Revenue Growth % (MoM)', Value: s.revenueGrowthPct },
       { Metric: 'Stock on Hand', Value: s.totalCurrentStock },
       { Metric: 'Out-of-stock SKUs', Value: s.outOfStockCount },
@@ -131,7 +134,7 @@ export default function ReportsPage() {
             <Kpi icon={Coins} label="Tax Collected" value={formatINR(rep.summary.taxCollected)} tone="zinc" />
             <Kpi icon={Undo2} label="Returns" value={num(rep.summary.returnCount)} tone="pink" sub={`${pct(rep.summary.returnRate)} · ${formatINR(rep.summary.returnValue)}`} />
             <Kpi icon={Ban} label="Cancellations" value={num(rep.summary.cancelledOrders)} tone="rose" sub={`${pct(rep.summary.cancelRate)} · ${formatINR(rep.summary.cancelledValue)}`} />
-            <Kpi icon={Boxes} label="Stock on Hand" value={num(rep.summary.totalCurrentStock)} tone="emerald" sub={rep.summary.outOfStockCount != null ? `${rep.summary.outOfStockCount} out of stock` : 'live stock N/A'} />
+            <Kpi icon={PackageX} label="Post-Delivery Returns" value={num(rep.summary.postDeliveryReturns)} tone="amber" sub={`${pct(rep.summary.postDeliveryReturnRate)} · ${formatINR(rep.summary.postDeliveryReturnValue)}`} />
             <Kpi icon={Gauge} label="Sell-through" value={pct(rep.summary.sellThroughRate)} tone="indigo" />
             <Kpi icon={Layers} label="Inventory Turnover" value={rep.summary.inventoryTurnover != null ? `${rep.summary.inventoryTurnover}×` : '—'} tone="violet" />
           </div>

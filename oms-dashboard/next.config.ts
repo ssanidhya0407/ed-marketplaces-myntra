@@ -7,6 +7,12 @@ const BACKEND = process.env.OMS_BACKEND || 'http://localhost:3100';
 const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: process.cwd(),
+  // Inline the session secret at build time so the auth middleware (Edge runtime,
+  // which doesn't read arbitrary runtime env) can verify the cookie. This lives
+  // only in the server-side edge bundle — it is never sent to the browser.
+  env: {
+    OMS_SESSION_SECRET: process.env.OMS_SESSION_SECRET || '',
+  },
   async rewrites() {
     return {
       beforeFiles: [
