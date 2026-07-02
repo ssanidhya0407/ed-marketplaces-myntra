@@ -1288,7 +1288,10 @@ router.post('/orders/api/financials/cogs/sync-alya', dashboardGate, async (_req,
 // Automatic COGS sync — pull cost prices from Alya on boot and on a fixed interval, so
 // profit/margin stay current with no manual action. Interval configurable (default 6h).
 const COGS_SYNC_INTERVAL_MS = Number(process.env.COGS_SYNC_INTERVAL_MS) || 6 * 60 * 60 * 1000;
+let cogsAutoSyncStarted = false;
 function startCogsAutoSync() {
+  if (cogsAutoSyncStarted) return null; // idempotent — safe if both server.js and module-load call it
+  cogsAutoSyncStarted = true;
   const run = async () => {
     try {
       const out = await syncAlyaCogs();
@@ -1302,6 +1305,8 @@ function startCogsAutoSync() {
   return timer;
 }
 router.startCogsAutoSync = startCogsAutoSync;
+// Self-start on module load so hosts that don't wire it into server.js still run the cron.
+startCogsAutoSync();
 
 // Which recent months actually have a settlement report (so the UI can land on real data).
 let finMonthsCache = null;
