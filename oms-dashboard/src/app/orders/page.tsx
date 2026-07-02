@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { RotateCw, X, Package, Boxes, Truck, Ban, CheckCircle2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api, type OrderSummary } from '@/lib/api';
@@ -9,7 +8,7 @@ import { isNewStatus } from '@/lib/status';
 import { useRowDetails } from '@/lib/useRowDetails';
 import OrdersTable from '@/components/OrdersTable';
 import OrderDetailModal from '@/components/OrderDetailModal';
-import { cx } from '@/lib/utils';
+import { cx, sortByNewest } from '@/lib/utils';
 
 const PAGE_SIZE = 12;
 
@@ -37,7 +36,6 @@ export default function AllOrdersPage() {
   // KPI counts come from the authoritative per-status totals (same source as Overview),
   // not from the loaded summary statuses — keeps the two strips consistent.
   const [kpi, setKpi] = useState<{ total: number; byStatus: Record<string, number>; completed: number } | null>(null);
-  const router = useRouter();
 
   // Deep-link: open with a status preselected via ?status=PK (from KPI cards elsewhere).
   useEffect(() => {
@@ -53,11 +51,11 @@ export default function AllOrdersPage() {
         const days = (new Date(to).getTime() - new Date(from).getTime()) / 86400000;
         if (days < 0) { setError('“From” must be before “To”.'); setLoading(false); return; }
         if (days > 7) { setError('Myntra caps date-filtered search to 7 days. Narrow the range, or clear both dates to see all orders.'); setLoading(false); return; }
-        setAllOrders(await fetchAllPages({ startDate: from, endDate: to }));
+        setAllOrders(sortByNewest(await fetchAllPages({ startDate: from, endDate: to })));
       } else if (from || to) {
         setError('Set both dates, or clear both.'); setLoading(false); return;
       } else {
-        setAllOrders(await fetchAllPages({}));
+        setAllOrders(sortByNewest(await fetchAllPages({})));
       }
     } catch (e: any) {
       setError(e.message);
@@ -114,7 +112,7 @@ export default function AllOrdersPage() {
       {/* KPI strip — authoritative per-status counts (matches Overview). Click to filter. */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
         <StatCard icon={Boxes} label="Total Orders" value={kpi?.total ?? 0} tone="indigo" loading={!kpi} onClick={() => setStatus('')} active={status === ''} />
-        <StatCard icon={Package} label="In Progress" value={by.WP ?? 0} tone="amber" loading={!kpi} onClick={() => router.push('/orders/new')} />
+        <StatCard icon={Package} label="In Progress" value={by.WP ?? 0} tone="amber" loading={!kpi} onClick={() => setStatus('WP')} active={status === 'WP'} />
         <StatCard icon={Boxes} label="Packed" value={by.PK ?? 0} tone="violet" loading={!kpi} onClick={() => setStatus('PK')} active={status === 'PK'} />
         <StatCard icon={Truck} label="Shipped" value={by.SH ?? 0} tone="emerald" loading={!kpi} onClick={() => setStatus('SH')} active={status === 'SH'} />
         <StatCard icon={Ban} label="Cancelled" value={by.IC ?? 0} tone="rose" loading={!kpi} onClick={() => setStatus('IC')} active={status === 'IC'} />
@@ -124,7 +122,7 @@ export default function AllOrdersPage() {
       <div className="rounded-2xl bg-white border border-black/[0.06] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.04)]">
         {loading && <div className="px-4 py-16 text-center text-sm text-zinc-400">Fetching from Myntra…</div>}
         {!loading && error && <div className="px-4 py-12 text-center text-sm text-rose-600">{error}</div>}
-        {!loading && !error && <OrdersTable orders={pageOrders} onSelect={setSelected} details={details} />}
+        {!loading && !error && <OrdersTable orders={pageOrders} onSelect={setSelected} details={details} onMutated={load} />}
       </div>
 
       {!loading && !error && filtered.length > PAGE_SIZE && (

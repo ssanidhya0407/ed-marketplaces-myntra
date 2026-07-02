@@ -252,8 +252,28 @@ function overrideDiscount({ startDate, endDate, discountType = 'FlatPercent', di
   return myntraSend('PUT', '/partner/v4/discount/override', { startDate, endDate, discountType, discountEntries });
 }
 
+// Payment History: GET /partner/v4/payments/history/{POSTPAID|PREPAID} — paginated
+// payment records between fromDate and toDate. Returns the raw Myntra { status, body }.
+function fetchPaymentHistory({ paymentMethod = 'POSTPAID', fromDate, toDate, pageNo = 1, pageSize = 20 } = {}) {
+  const method = String(paymentMethod).toUpperCase() === 'PREPAID' ? 'PREPAID' : 'POSTPAID';
+  return myntraGet(`/partner/v4/payments/history/${method}`, { fromDate, toDate, pageNo, pageSize });
+}
+
+// Invoice/Settlement Reports: POST /partner/v4/payments/reports/{MONTHLY_REPORTS|ONE_TIME_REPORTS}
+// Body { year, month?, reportName }. month is required only for MONTHLY_REPORTS. Returns
+// { data:[{ blobReportType, reportName, reportPath }], totalCount } — reportPath is a signed
+// URL to the downloadable report (CSV/Excel).
+function fetchInvoiceReport({ reportType = 'MONTHLY_REPORTS', year, month, reportName } = {}) {
+  const type = String(reportType).toUpperCase() === 'ONE_TIME_REPORTS' ? 'ONE_TIME_REPORTS' : 'MONTHLY_REPORTS';
+  const body = { year: String(year), reportName };
+  if (type === 'MONTHLY_REPORTS' && month != null && month !== '') body.month = String(month).padStart(2, '0');
+  return myntraSend('POST', `/partner/v4/payments/reports/${type}`, body);
+}
+
 module.exports = {
   generateToken,
+  fetchPaymentHistory,
+  fetchInvoiceReport,
   fetchOrderList,
   fetchOrderById,
   fetchPacketById,

@@ -1,9 +1,12 @@
 const app = require('./app');
 const env = require('./config/env');
 const db = require('./db/mockDb');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 const server = app.listen(env.port, () => {
   console.log(`Myntra OMS outbound backend listening on http://localhost:${env.port}`);
+  // Keep SKU cost prices fresh automatically (Alya sync on boot + every few hours).
+  if (typeof dashboardRoutes.startCogsAutoSync === 'function') dashboardRoutes.startCogsAutoSync();
 });
 
 server.requestTimeout = env.requestTimeoutMs;
