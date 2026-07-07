@@ -1202,6 +1202,14 @@ router.get('/orders/api/payments/reconciliation', dashboardGate, async (req, res
 // The settlement reports only carry Myntra's vendor code (ALJE…); the friendly seller SKU
 // (e.g. Earrings565 — which has a product image) lives on the live order, reachable via the
 // row's seller_order_id (a UUID). Resolve + cache it so the financial rows can show thumbnails.
+// Real Alya products are jewellery — their SKUs start with these prefixes. Inbound test
+// orders/returns pushed by Myntra's cert/UAT env carry junk SKUs (Flipkart-BT, TL-1001,
+// 52_FLIP_L_HB, …) and must not surface in the Inbox/Returns (or sync to dashboardweb).
+// Fail-open: an unresolved/blank SKU is kept, so a real order is never hidden.
+const ALYA_SKU_PREFIXES = String(process.env.ALYA_SKU_PREFIXES || 'earrings,necklace')
+  .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+const isAlyaSku = (sku) => { const s = String(sku || '').toLowerCase(); return !s || ALYA_SKU_PREFIXES.some((p) => s.startsWith(p)); };
+
 const sellerSkuCache = new Map();
 // Myntra vendor SKU (e.g. ALJEAEARR132726470) → friendly seller SKU (Earrings675). Built from
 // any order that resolves both; lets completed orders (whose live detail is empty) still show a
@@ -1679,6 +1687,9 @@ router.get('/orders/api/inbox/list', dashboardGate, async (req, res) => {
   const codeMap = new Map(kept.map((k) => [String(k.o.sellerOrderId), k.code]));
   const orders = [];
   for (const { o } of kept) {
+    // Drop test-catalog orders (non-Alya SKUs pushed by Myntra's cert/UAT webhook).
+    const l0 = lines(o)[0];
+    if (l0 && !isAlyaSku(l0.sku)) continue;
     const s = inboxSummary(o, codeMap);
     if (wanted && s.orderLines[0] && s.orderLines[0].status !== wanted) continue;
     orders.push(s);
@@ -1729,9 +1740,15 @@ function sendInboxPdf(res, kind, packetId) {
 router.get('/orders/api/inbox/label/:packetId', dashboardGate, (req, res) => sendInboxPdf(res, 'label', req.params.packetId));
 router.get('/orders/api/inbox/invoice/:packetId', dashboardGate, (req, res) => sendInboxPdf(res, 'invoice', req.params.packetId));
 
-router.get('/orders/api/inbox/returns', dashboardGate, (_req, res) => {
+router.get('/orders/api/inbox/returns', dashboardGate, async (_req, res) => {
+  const all = [...db.returns.values()];
+  // Returns carry no SKU — resolve the friendly SKU (cached) so we can drop test-catalog
+  // returns (non-Alya SKUs). If resolution fails (Myntra API blip), we keep the return.
+  try { await resolveSellerSkus(all.map((r) => r.sellerOrderId).filter(Boolean)); } catch { /* keep all */ }
   const returns = [];
-  for (const r of db.returns.values()) {
+  for (const r of all) {
+    const sku = sellerSkuCache.get(r.sellerOrderId) || '';
+    if (sku && !isAlyaSku(sku)) continue; // skip resolved non-Alya (test) returns
     returns.push({
       id: r.id, type: r.type || null, status: r.status || null,
       sellerOrderId: r.sellerOrderId || null, orderLineId: r.orderLineId || null,
