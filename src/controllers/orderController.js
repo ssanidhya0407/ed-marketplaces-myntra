@@ -1,9 +1,13 @@
 const { sendSuccess } = require('../services/responseService');
 const orderService = require('../services/orderService');
+const { notifyOrderEvent } = require('../services/dashboardNotify');
 
 function createOrder(req, res, next) {
   try {
     const result = orderService.createOrder(req.validated);
+    // A new order landed — nudge dashboardweb to deduct shared stock in real time
+    // (fire-and-forget; never blocks or fails the ack we owe Myntra).
+    notifyOrderEvent(req.params.sellerOrderId, 'create');
     return sendSuccess(req, res, result.code, {
       overrideMessage: result.overrideMessage,
       extraFields: result.extraFields,
@@ -16,6 +20,9 @@ function createOrder(req, res, next) {
 function updateOrder(req, res, next) {
   try {
     const result = orderService.updateOrder(req.validated);
+    // Status change (incl. cancellations) — same real-time nudge; dashboardweb
+    // re-reads the order and restores stock if it was cancelled.
+    notifyOrderEvent(req.params.sellerOrderId, req.params.eventType || 'update');
     return sendSuccess(req, res, result.code, {
       overrideMessage: result.overrideMessage,
       extraFields: result.extraFields,
