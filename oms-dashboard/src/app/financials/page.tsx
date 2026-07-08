@@ -24,7 +24,7 @@ const REPORTS: [string, string, boolean][] = [
 ];
 type ViewMode = 'all' | 'settled' | 'awaiting';
 type MainTab = 'orders' | 'skus' | 'products' | 'returns' | 'settlements' | 'nonorder';
-type SortKey = 'value' | 'fees' | 'net' | 'status';
+type SortKey = 'date' | 'value' | 'fees' | 'net' | 'status';
 const inr = (n: number) => formatINR(n);
 const monthLabel = (ms: string) => { const [y, m] = ms.split('-'); return `${MONTH_NAMES[Number(m)]} ${y}`; };
 const dateLabel = (dstr?: string | null) => { if (!dstr) return null; const [y, m, d] = dstr.split('-'); return `${d} ${MONTH_NAMES[Number(m)]} ${y}`; };
@@ -49,7 +49,7 @@ export default function FinancialsPage() {
   const [view, setView] = useState<ViewMode>('all');
   const [mainTab, setMainTab] = useState<MainTab>('orders');
   const [q, setQ] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('net');
+  const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
   const [reportName, setReportName] = useState('PG_Forward_Settled');
@@ -92,7 +92,7 @@ export default function FinancialsPage() {
     const n = q.trim().toLowerCase();
     let out = workOrders.filter((o) => (view === 'all' || (view === 'settled' ? o.status === 'Settled' : o.status === 'Awaiting')) && (!n || o.sku.toLowerCase().includes(n) || o.orderId.includes(n)));
     const dir = sortDir === 'asc' ? 1 : -1;
-    out = out.sort((a, b) => sortKey === 'status' ? a.status.localeCompare(b.status) * dir : (((a[sortKey] as number) ?? -1) - ((b[sortKey] as number) ?? -1)) * dir);
+    out = out.sort((a, b) => sortKey === 'status' ? a.status.localeCompare(b.status) * dir : sortKey === 'date' ? String(a.date || '').localeCompare(String(b.date || '')) * dir : (((a[sortKey] as number) ?? -1) - ((b[sortKey] as number) ?? -1)) * dir);
     return out;
   }, [workOrders, view, q, sortKey, sortDir]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -291,7 +291,7 @@ function OrderWorkspace({ rows, onSort, sortKey, sortDir }: { rows: WorkOrder[];
       <thead className="bg-zinc-50/80 text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">
         <tr>
           <th className="px-4 py-3 text-left">Order · Product</th>
-          <th className="px-4 py-3 text-left w-28">Order date</th>
+          <SortTh k="date" label="Order date" cls="text-left w-28" />
           <SortTh k="value" label="Value" cls="text-right w-28" />
           <SortTh k="fees" label="Fees" cls="text-right w-24" />
           <th className="px-4 py-3 text-right w-24">Taxes</th>
