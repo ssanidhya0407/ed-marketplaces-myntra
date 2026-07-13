@@ -52,14 +52,26 @@ async function generateToken() {
   });
 
   // Myntra returns the JWT in the access_token RESPONSE HEADER, not the body.
-  const accessToken = headers.get('access_token');
+  let accessToken = headers.get('access_token');
   const refreshToken = headers.get('refresh_token');
 
   if (status !== 200 || !accessToken) {
     throw new AppError(2006, `Myntra token generation failed (HTTP ${status}): ${body.statusMessage || body.message || 'unknown error'}`);
   }
 
-  const expFromJwt = jwtExpiryMs(accessToken);
+  // Myntra's generate_token mints the token with a fixed ~30-day window and can
+  // hand back one that is ALREADY expired. When that happens (and a refresh_token
+  // was returned), exchange it for a fresh access_token via refresh_token — this
+  // is the only way to get a usable token without re-issuing credentials.
+  let expFromJwt = jwtExpiryMs(accessToken);
+  if (refreshToken && (!expFromJwt || expFromJwt <= Date.now())) {
+    const refreshed = await refreshAccessToken(refreshToken);
+    if (refreshed) {
+      accessToken = refreshed;
+      expFromJwt = jwtExpiryMs(accessToken);
+    }
+  }
+
   cachedToken = {
     accessToken,
     refreshToken: refreshToken || null,
@@ -69,12 +81,49 @@ async function generateToken() {
   return cachedToken;
 }
 
+// Exchange a refresh_token for a fresh access_token (returned in the response
+// HEADER, like generate_token). merchant_id must be in the body or Myntra replies
+// "Merchant Id required". Returns the new token, or null on any failure.
+async function refreshAccessToken(refreshToken) {
+  try {
+    const { status, headers } = await requestJson(`${env.myntraApiBase}/authorization/refresh_token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        refresh_token: refreshToken,
+        'x-partner-store': env.myntraPartnerStore,
+      },
+      body: JSON.stringify({ merchant_id: env.myntraMerchantId }),
+    });
+    const at = headers.get('access_token');
+    return status === 200 && at ? at : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 async function getAccessToken() {
   if (cachedToken && Date.now() < cachedToken.expiresAtMs) {
     return cachedToken.accessToken;
   }
   const token = await generateToken();
   return token.accessToken;
+}
+
+// Myntra doesn't always use HTTP 401 for an expired/revoked token — it can return
+// the error inside a 200/4xx envelope like { statusMessage: 'access_token has expired' }.
+// If we only retried on 401 we'd keep serving the dead cached token (until its
+// JWT-derived expiry passes), blanking every Myntra-backed view. Detect both.
+function isTokenExpired(status, body) {
+  if (status === 401) return true;
+  const msg = String((body && (body.statusMessage || body.message || body.error)) || '').toLowerCase();
+  return (
+    msg.includes('access_token has expired') ||
+    msg.includes('token has expired') ||
+    msg.includes('token is expired') ||
+    msg.includes('invalid access_token') ||
+    msg.includes('invalid_token')
+  );
 }
 
 async function myntraGet(path, query) {
@@ -93,8 +142,8 @@ async function myntraGet(path, query) {
     },
   });
 
-  if (status === 401) {
-    // Token may have been revoked server-side; force one refresh and retry.
+  if (isTokenExpired(status, body)) {
+    // Token expired/revoked server-side; force one refresh and retry.
     cachedToken = null;
     const retryToken = await getAccessToken();
     const retry = await requestJson(url.toString(), {
@@ -105,7 +154,7 @@ async function myntraGet(path, query) {
         'x-partner-store': env.myntraPartnerStore,
       },
     });
-    return retry;
+    return { status: retry.status, body: retry.body };
   }
 
   return { status, body };
@@ -144,7 +193,7 @@ async function myntraSend(method, path, jsonBody) {
   });
 
   let res = await requestJson(`${env.myntraApiBase}${path}`, opts(accessToken));
-  if (res.status === 401) {
+  if (isTokenExpired(res.status, res.body)) {
     cachedToken = null;
     res = await requestJson(`${env.myntraApiBase}${path}`, opts(await getAccessToken()));
   }
