@@ -1751,6 +1751,10 @@ router.get('/orders/api/inbox/returns', dashboardGate, async (_req, res) => {
     if (sku && !isAlyaSku(sku)) continue; // skip resolved non-Alya (test) returns
     returns.push({
       id: r.id, type: r.type || null, status: r.status || null,
+      // Returns carry no SKU natively; expose the SKU we resolved (via order detail)
+      // so consumers (dashboardweb) can attribute the return per-SKU without their
+      // own Myntra access. Empty when the order's SKU couldn't be resolved.
+      sku: sku || null,
       sellerOrderId: r.sellerOrderId || null, orderLineId: r.orderLineId || null,
       trackingNumber: r.trackingNumber || null, reason: r.reason || null,
       returnWarehouseCode: r.returnWarehouseCode || null, createdOn: r.createdOn || null,
